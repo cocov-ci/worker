@@ -1,0 +1,22 @@
+#!/bin/bash
+
+if ! which mockgen 1>&2 > /dev/null; then
+  echo "Please install mockgen: go install github.com/golang/mock/mockgen@v1.6.0"
+  exit 1
+fi
+
+rm -rfv mocks
+mkdir mocks
+
+function gen() {
+  path="$1"
+  filename="$(basename "$path")"
+  pkgname="$(basename "$(dirname "$path")")"
+  mockgen -package=mocks -source="$path" -mock_names "$2" > "mocks/${pkgname}_${filename%.*}_mocks.go"
+}
+
+gen "api/api.go" "Client=APIMock"
+gen "docker/docker.go" "Client=DockerMock"
+gen "redis/redis.go" "Client=RedisMock"
+gen "storage/base.go" "Base=StorageMock"
+gen "runner/scheduler.go" "IndirectScheduler=IndirectScheduler"
