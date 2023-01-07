@@ -27,7 +27,7 @@ func withBackoff(log *zap.Logger, operationName string, maxTries int, fn func() 
 	for i := 0; i < maxTries; i++ {
 		if err = fn(); err != nil {
 			toWait := time.Duration(backoff) * time.Second
-			log.Info("Backing off "+operationName, zap.Duration("delay", toWait))
+			log.Info("Backing off "+operationName, zap.Duration("delay", toWait), zap.String("attempt", fmt.Sprintf("%d/%d", i+1, maxTries)))
 			sleepFunc(toWait)
 			backoff *= 2
 			continue
@@ -45,6 +45,8 @@ type containerResult struct {
 	OutputFileData  []byte
 	Image           string
 }
+
+const defaultAttemptCount = 10
 
 func newWorker(log *zap.Logger, id int, scheduler IndirectScheduler, dockerClient docker.Client, apiClient api.Client, storageClient storage.Base, redisClient redis.Client, done func()) *worker {
 	return &worker{
@@ -85,6 +87,22 @@ type worker struct {
 	emittedErrors   map[string]bool
 }
 
+func (w *worker) SetCheckError(plugin string, message string) {
+	err := withBackoff(w.log, "emitting status for check "+plugin, defaultAttemptCount, func() error {
+		return w.api.SetCheckError(w.job, plugin, message)
+	})
+
+	if err != nil {
+		w.log.Error("Failed to invoke SetCheckError",
+			zap.String("plugin", plugin),
+			zap.String("message", message),
+			zap.Error(err))
+		return
+	}
+
+	w.emittedErrors[plugin] = true
+}
+
 func (w *worker) Run() {
 	defer w.done()
 
@@ -114,9 +132,7 @@ func (w *worker) emitGeneralError() {
 			continue
 		}
 
-		if err := w.api.SetCheckError(w.job, c.Plugin, fmt.Sprintf("An internal error interrupted the initialization of job %s. Please refer to the scheduler's logs for further information.", w.job.JobID)); err != nil {
-			w.log.Error("failed emitting general error", zap.Error(err))
-		}
+		w.SetCheckError(c.Plugin, fmt.Sprintf("An internal error interrupted the initialization of job %s. Please refer to the scheduler's logs for further information.", w.job.JobID))
 	}
 }
 
@@ -178,7 +194,10 @@ func (w *worker) perform() error {
 
 	finalStatus, checks := w.aggregateResults()
 
-	err = w.api.PushIssues(w.job, checks, finalStatus)
+	err = withBackoff(w.log, "pushing results", defaultAttemptCount, func() error {
+		return w.api.PushIssues(w.job, checks, finalStatus)
+	})
+
 	if err != nil {
 		w.log.Error("Error pushing results", zap.Error(err))
 	}
@@ -189,7 +208,7 @@ func (w *worker) acquireCommit() error {
 	w.log.Info("Acquiring commit",
 		zap.String("repository", w.job.Repo),
 		zap.String("sha", w.job.Commitish))
-	err := withBackoff(w.log, "downloading commit", 10, func() error {
+	err := withBackoff(w.log, "downloading commit", defaultAttemptCount, func() error {
 		err := w.storage.DownloadCommit(w.job.Repo, w.job.Commitish, w.commitDir)
 		if err != nil {
 			w.log.Error("Error acquiring commit",
@@ -211,7 +230,7 @@ func (w *worker) downloadImages() error {
 	for _, v := range w.job.Checks {
 		log := w.log.With(zap.String("image", v.Plugin))
 		log.Info("Downloading image", zap.String("image", v.Plugin))
-		err := withBackoff(log, "downloading image", 10, func() error {
+		err := withBackoff(log, "downloading image", defaultAttemptCount, func() error {
 			return w.docker.PullImage(v.Plugin)
 		})
 
@@ -271,7 +290,7 @@ func (w *worker) obtainSecrets() error {
 			}
 
 			var secretData []byte
-			err = withBackoff(w.log, "obtaining secret", 10, func() error {
+			err = withBackoff(w.log, "obtaining secret", defaultAttemptCount, func() error {
 				data, err := w.api.GetSecret(&m)
 				if err != nil {
 					return err
@@ -406,26 +425,29 @@ func (w *worker) aggregateResults() (string, map[string]any) {
 
 	for _, v := range w.containerStatus.Map() {
 		if v.Error != nil {
-			w.emitCheckError(v.Image, fmt.Sprintf("Execution failed due to internal error: %s", v.Error))
+			w.SetCheckError(v.Image, fmt.Sprintf("Execution failed due to internal error: %s", v.Error))
 			failed = true
 			continue
 		}
 
 		if v.ExitStatus != 0 {
-			w.emitCheckError(v.Image, fmt.Sprintf("Execution failed. Plugin exited with status %d:\n%s", v.ExitStatus, v.ContainerOutput))
+			w.SetCheckError(v.Image, fmt.Sprintf("Execution failed. Plugin exited with status %d:\n%s", v.ExitStatus, v.ContainerOutput))
 			failed = true
 			continue
 		}
 
 		if records, err := ParseReportItems(v.OutputFileData); err != nil {
-			w.emitCheckError(v.Image, fmt.Sprintf("Execution failed. Error parsing plugin output: %s", err.Error()))
+			w.SetCheckError(v.Image, fmt.Sprintf("Execution failed. Error parsing plugin output: %s", err.Error()))
 			failed = true
 			continue
 		} else {
 			checks[strings.SplitN(v.Image, ":", 2)[0]] = records
 		}
 
-		if err := w.api.SetCheckSucceeded(w.job, v.Image); err != nil {
+		err := withBackoff(w.log, "emitting check succeeded status", defaultAttemptCount, func() error {
+			return w.api.SetCheckSucceeded(w.job, v.Image)
+		})
+		if err != nil {
 			w.log.Error("Failed invoking SetCheckSucceeded", zap.Error(err))
 		}
 	}
@@ -438,13 +460,6 @@ func (w *worker) aggregateResults() (string, map[string]any) {
 	return finalStatus, checks
 }
 
-func (w *worker) emitCheckError(check string, msg string) {
-	w.emittedErrors[check] = true
-	if err := w.api.SetCheckError(w.job, check, msg); err != nil {
-		w.log.Error("Failed invoking SetCheckError", zap.Error(err))
-	}
-}
-
 func (w *worker) serviceContainer(cID string, done func()) {
 	defer done()
 	cInfo := w.containers[cID]
@@ -452,19 +467,22 @@ func (w *worker) serviceContainer(cID string, done func()) {
 
 	if err := w.docker.ContainerStart(cID); err != nil {
 		log.Error("Failed starting container", zap.Error(err))
-		w.emitCheckError(cInfo.Image, fmt.Sprintf("Failed initializing container for %s: %s", cInfo.Image, err.Error()))
+		w.SetCheckError(cInfo.Image, fmt.Sprintf("Failed initializing container for %s: %s", cInfo.Image, err.Error()))
 		w.containerStatus.Set(cID, &containerResult{Error: fmt.Errorf("failed executing ContainerStart: %w", err)})
 		return
 	}
 
-	if err := w.api.SetCheckRunning(w.job, cInfo.Image); err != nil {
+	err := withBackoff(w.log, "setting running status", defaultAttemptCount, func() error {
+		return w.api.SetCheckRunning(w.job, cInfo.Image)
+	})
+	if err != nil {
 		log.Error("Failed invoking SetCheckRunning", zap.Error(err))
 	}
 
 	log.Info("Container started. Waiting for completion...")
 	if err := w.docker.ContainerWait(cID); err != nil {
 		log.Error("Error waiting container", zap.Error(err))
-		w.emitCheckError(cInfo.Image, fmt.Sprintf("Failed waiting container result for %s: %s", cInfo.Image, err.Error()))
+		w.SetCheckError(cInfo.Image, fmt.Sprintf("Failed waiting container result for %s: %s", cInfo.Image, err.Error()))
 		w.containerStatus.Set(cID, &containerResult{Error: fmt.Errorf("failed executing ContainerWait: %w", err)})
 		return
 	}
@@ -473,7 +491,7 @@ func (w *worker) serviceContainer(cID string, done func()) {
 	containerOutput, exitStatus, err := w.docker.GetContainerResult(cID)
 	if err != nil {
 		log.Error("GetContainerResult failed", zap.Error(err))
-		w.emitCheckError(cInfo.Image, fmt.Sprintf("Failed obtaining result data for %s: %s", cInfo.Image, err.Error()))
+		w.SetCheckError(cInfo.Image, fmt.Sprintf("Failed obtaining result data for %s: %s", cInfo.Image, err.Error()))
 		w.containerStatus.Set(cID, &containerResult{Error: fmt.Errorf("failed executing GetContainerResult: %w", err)})
 		return
 	}
@@ -483,7 +501,7 @@ func (w *worker) serviceContainer(cID string, done func()) {
 	output, err = os.ReadFile(cInfo.OutputFile)
 	if err != nil {
 		log.Error("Error reading output file", zap.Error(err), zap.String("output_file", cInfo.OutputFile))
-		w.emitCheckError(cInfo.Image, fmt.Sprintf("Failed reading output data for %s: %s", cInfo.Image, err.Error()))
+		w.SetCheckError(cInfo.Image, fmt.Sprintf("Failed reading output data for %s: %s", cInfo.Image, err.Error()))
 		w.containerStatus.Set(cID, &containerResult{Error: fmt.Errorf("failed reading output file: %w", err)})
 		return
 	}
