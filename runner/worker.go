@@ -82,6 +82,7 @@ type worker struct {
 	containers      map[string]*docker.CreateContainerResult
 	containerStatus *ConcurrentMap[string, *containerResult]
 	secretsSource   map[string]string
+	emittedErrors   map[string]bool
 }
 
 func (w *worker) Run() {
@@ -95,13 +96,27 @@ func (w *worker) Run() {
 			w.log.Info("Stopping...")
 			break
 		}
+		w.cleanup()
 		w.log.Info("Picked up", zap.String("job_id", job.JobID))
 		w.scheduler.RegisterJob(job, w.id)
 		w.job = job
 		if err := w.perform(); err != nil {
 			w.log.Error("Failed performing job", zap.Error(err))
+			w.emitGeneralError()
 		}
 		w.scheduler.DeregisterJob(job, w.id)
+	}
+}
+
+func (w *worker) emitGeneralError() {
+	for _, c := range w.job.Checks {
+		if _, ok := w.emittedErrors[c.Plugin]; ok {
+			continue
+		}
+
+		if err := w.api.SetCheckError(w.job, c.Plugin, fmt.Sprintf("An internal error interrupted the initialization of job %s. Please refer to the scheduler's logs for further information.", w.job.JobID)); err != nil {
+			w.log.Error("failed emitting general error", zap.Error(err))
+		}
 	}
 }
 
@@ -120,6 +135,7 @@ func (w *worker) cleanup() {
 		}
 	}
 	w.containers = map[string]*docker.CreateContainerResult{}
+	w.emittedErrors = map[string]bool{}
 	w.containerStatus.Reset()
 }
 
@@ -130,7 +146,6 @@ func (w *worker) perform() error {
 		return err
 	}
 
-	defer w.cleanup()
 	w.workDir = tempPath
 	w.commitDir = filepath.Join(w.workDir, "src")
 	w.secretsDir = filepath.Join(w.workDir, "private")
@@ -424,6 +439,7 @@ func (w *worker) aggregateResults() (string, map[string]any) {
 }
 
 func (w *worker) emitCheckError(check string, msg string) {
+	w.emittedErrors[check] = true
 	if err := w.api.SetCheckError(w.job, check, msg); err != nil {
 		w.log.Error("Failed invoking SetCheckError", zap.Error(err))
 	}
