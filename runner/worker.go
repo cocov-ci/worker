@@ -323,7 +323,7 @@ func (w *worker) prepareRuntime() error {
 				bindings[name] = m.Target
 			}
 			{
-				bindingPath := filepath.Join(w.secretsDir, "binding")
+				bindingPath := filepath.Join(w.secretsDir, "bindings")
 				bindingFile, err := os.Create(bindingPath)
 				if err != nil {
 					w.log.Error("Failed creating secret binding file", zap.Error(err))
@@ -340,7 +340,7 @@ func (w *worker) prepareRuntime() error {
 					abortAndCleanup()
 					return err
 				}
-				mounts[bindingPath] = "/secrets/binding"
+				mounts[bindingPath] = "/secrets/bindings"
 			}
 		}
 
