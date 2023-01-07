@@ -13,6 +13,7 @@ import (
 	"go.uber.org/zap"
 	"io"
 	"os"
+	"runtime"
 	"time"
 )
 
@@ -93,6 +94,25 @@ func (c *clientImpl) CreateContainer(info *RunInformation) (*CreateContainerResu
 	workDirTarget := uuid.Generate().String()
 	outputTarget := uuid.Generate().String()
 	outputFilePath := tempFile.Name()
+	if err = os.Remove(outputFilePath); err != nil {
+		return nil, err
+	}
+
+	if f, err := os.Create(outputFilePath); err != nil {
+		return nil, err
+	} else {
+		if err = f.Close(); err != nil {
+			return nil, err
+		}
+	}
+
+	//goland:noinspection GoBoolExpressions
+	if runtime.GOOS != "darwin" {
+		// Suppressing this on darwin since Docker on Darwin is a different beast.
+		if err = os.Chown(outputFilePath, 1000, 1000); err != nil {
+			return nil, fmt.Errorf("failed chowning '%s': %w", outputFilePath, err)
+		}
+	}
 
 	var envs []string
 	{
@@ -144,6 +164,7 @@ func (c *clientImpl) CreateContainer(info *RunInformation) (*CreateContainerResu
 	res, err := c.d.ContainerCreate(context.Background(), &container.Config{
 		Env:   envs,
 		Image: info.Image,
+		User:  "1000",
 	}, &container.HostConfig{
 		AutoRemove: false,
 		Mounts:     mounts,

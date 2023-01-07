@@ -117,6 +117,9 @@ func untar(source, dest string) error {
 		return err
 	}
 
-	_, err := execute.Exec([]string{"tar", "--strip-components=1", "-xf", source}, &execute.Opts{Cwd: dest})
+	if _, err := execute.Exec([]string{"tar", "--strip-components=1", "-xf", source}, &execute.Opts{Cwd: dest}); err != nil {
+		return err
+	}
+	_, err := execute.Exec([]string{"chown", "-Rf", "1000:1000", dest}, nil)
 	return err
 }

@@ -335,7 +335,9 @@ func (w *worker) prepareRuntime() error {
 					data.Write([]byte(fmt.Sprintf("%s=%s", k, v)))
 					data.WriteByte(0x00)
 				}
-				if err = writeAll(data.Bytes(), bindingFile, true); err != nil {
+
+				dataBytes := data.Bytes()
+				if err = writeAll(dataBytes[:len(dataBytes)-1], bindingFile, true); err != nil {
 					w.log.Error("Failed writing to secret binding file", zap.Error(err))
 					abortAndCleanup()
 					return err
