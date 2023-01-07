@@ -1,13 +1,18 @@
 package runner
 
 import (
+	"bytes"
+	"crypto/sha1"
+	"encoding/hex"
 	"fmt"
 	"github.com/cocov-ci/worker/api"
 	"github.com/cocov-ci/worker/docker"
 	"github.com/cocov-ci/worker/redis"
 	"github.com/cocov-ci/worker/storage"
 	"go.uber.org/zap"
+	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -69,10 +74,14 @@ type worker struct {
 	storage   storage.Base
 	redis     redis.Client
 
-	job             *redis.Job
-	workDir         string
+	job        *redis.Job
+	workDir    string
+	commitDir  string
+	secretsDir string
+
 	containers      map[string]*docker.CreateContainerResult
 	containerStatus *ConcurrentMap[string, *containerResult]
+	secretsSource   map[string]string
 }
 
 func (w *worker) Run() {
@@ -123,8 +132,22 @@ func (w *worker) perform() error {
 
 	defer w.cleanup()
 	w.workDir = tempPath
+	w.commitDir = filepath.Join(w.workDir, "src")
+	w.secretsDir = filepath.Join(w.workDir, "private")
+
+	if err = os.MkdirAll(w.commitDir, 0750); err != nil {
+		return err
+	}
+
+	if err = os.MkdirAll(w.secretsDir, 0750); err != nil {
+		return err
+	}
 
 	if err = w.downloadImages(); err != nil {
+		return err
+	}
+
+	if err = w.obtainSecrets(); err != nil {
 		return err
 	}
 
@@ -152,7 +175,7 @@ func (w *worker) acquireCommit() error {
 		zap.String("repository", w.job.Repo),
 		zap.String("sha", w.job.Commitish))
 	err := withBackoff(w.log, "downloading commit", 10, func() error {
-		err := w.storage.DownloadCommit(w.job.Repo, w.job.Commitish, w.workDir)
+		err := w.storage.DownloadCommit(w.job.Repo, w.job.Commitish, w.commitDir)
 		if err != nil {
 			w.log.Error("Error acquiring commit",
 				zap.String("repo", w.job.Repo),
@@ -171,10 +194,10 @@ func (w *worker) acquireCommit() error {
 func (w *worker) downloadImages() error {
 	w.log.Info("Downloading images for checks")
 	for _, v := range w.job.Checks {
-		log := w.log.With(zap.String("image", v))
-		log.Info("Downloading image", zap.String("image", v))
+		log := w.log.With(zap.String("image", v.Plugin))
+		log.Info("Downloading image", zap.String("image", v.Plugin))
 		err := withBackoff(log, "downloading image", 10, func() error {
-			return w.docker.PullImage(v)
+			return w.docker.PullImage(v.Plugin)
 		})
 
 		if err != nil {
@@ -183,6 +206,82 @@ func (w *worker) downloadImages() error {
 		}
 		log.Info("Downloaded image")
 	}
+	return nil
+}
+
+func writeAll(data []byte, into io.WriteCloser, close bool) error {
+	toWrite := len(data)
+	written := 0
+	for written < toWrite {
+		n, err := into.Write(data[written:])
+		if err != nil {
+			return fmt.Errorf("failed copying stream: %w", err)
+		}
+		written += n
+	}
+
+	if close {
+		err := into.Close()
+		if err != nil {
+			return fmt.Errorf("failed closing stream: %w", err)
+		}
+	}
+	return nil
+}
+
+func hash(str string) string {
+	sha := sha1.New()
+	sha.Write([]byte(str))
+	return hex.EncodeToString(sha.Sum(nil))
+}
+
+func (w *worker) obtainSecrets() error {
+	allSecrets := map[string]string{}
+	purge := func() {
+		for _, p := range allSecrets {
+			if err := os.RemoveAll(p); err != nil {
+				w.log.Error("Failed removing secret piece", zap.Error(err))
+			}
+		}
+	}
+
+	for _, c := range w.job.Checks {
+		for _, m := range c.Mounts {
+			secretPath := filepath.Join(w.secretsDir, hash(m.Authorization))
+			tmp, err := os.Create(secretPath)
+			if err != nil {
+				w.log.Error("Creating secretPath failed", zap.String("path", secretPath), zap.Error(err))
+				purge()
+				return err
+			}
+
+			var secretData []byte
+			err = withBackoff(w.log, "obtaining secret", 10, func() error {
+				data, err := w.api.GetSecret(&m)
+				if err != nil {
+					return err
+				}
+				secretData = data
+				return nil
+			})
+
+			if err != nil {
+				purge()
+				w.log.Error("Failed obtaining secret. All attempts failed.", zap.Error(err))
+				return err
+			}
+
+			if err = writeAll(secretData, tmp, true); err != nil {
+				purge()
+				w.log.Error("Failed flushing secret.", zap.Error(err))
+				return err
+			}
+
+			allSecrets[m.Authorization] = secretPath
+		}
+	}
+
+	w.secretsSource = allSecrets
 	return nil
 }
 
@@ -205,12 +304,53 @@ func (w *worker) prepareRuntime() error {
 		}
 	}
 
-	for _, image := range w.job.Checks {
+	for _, check := range w.job.Checks {
+		var mounts map[string]string
+		if len(check.Mounts) > 0 {
+			mounts = map[string]string{}
+			bindings := map[string]string{}
+			for _, m := range check.Mounts {
+				local, ok := w.secretsSource[m.Authorization]
+				if !ok {
+					w.log.Error("Failed mounting secret for path, as the source could not be located",
+						zap.String("path", m.Target),
+						zap.String("check", check.Plugin))
+					abortAndCleanup()
+					return fmt.Errorf("failed mounting secret for '%s': unable to locate secret path %s", check.Plugin, m.Target)
+				}
+				name := hash(m.Target)
+				mounts[local] = "/secrets/" + name
+				bindings[name] = m.Target
+			}
+			{
+				bindingPath := filepath.Join(w.secretsDir, "binding")
+				bindingFile, err := os.Create(bindingPath)
+				if err != nil {
+					w.log.Error("Failed creating secret binding file", zap.Error(err))
+					abortAndCleanup()
+					return err
+				}
+				data := bytes.Buffer{}
+				for k, v := range bindings {
+					data.Write([]byte(fmt.Sprintf("%s=%s", k, v)))
+					data.WriteByte(0x00)
+				}
+				if err = writeAll(data.Bytes(), bindingFile, true); err != nil {
+					w.log.Error("Failed writing to secret binding file", zap.Error(err))
+					abortAndCleanup()
+					return err
+				}
+				mounts[bindingPath] = "/secrets/binding"
+			}
+		}
+
 		res, err := w.docker.CreateContainer(&docker.RunInformation{
-			Image:     image,
-			WorkDir:   w.workDir,
+			Image:     check.Plugin,
+			WorkDir:   w.commitDir,
 			RepoName:  w.job.Repo,
 			Commitish: w.job.Commitish,
+			Mounts:    mounts,
+			Envs:      check.Envs,
 		})
 		if err != nil {
 			w.log.Error("Error creating container. Aborting operation.",
@@ -221,7 +361,7 @@ func (w *worker) prepareRuntime() error {
 		w.containers[res.ContainerID] = res
 		w.log.Info("Created container",
 			zap.String("container_id", res.ContainerID),
-			zap.String("for_check", image))
+			zap.String("for_check", check.Plugin))
 	}
 
 	return nil

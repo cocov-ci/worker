@@ -5,11 +5,23 @@ type GitStorage struct {
 	Path string `json:"path,omitempty"`
 }
 
+type Check struct {
+	Plugin string            `json:"plugin,omitempty"`
+	Envs   map[string]string `json:"envs,omitempty"`
+	Mounts []Mount           `json:"mounts,omitempty"`
+}
+
+type Mount struct {
+	Kind          string `json:"kind,omitempty"`
+	Authorization string `json:"authorization,omitempty"`
+	Target        string `json:"target,omitempty"`
+}
+
 type Job struct {
 	JobID      string     `json:"job_id,omitempty"`
 	Org        string     `json:"org,omitempty"`
 	Repo       string     `json:"repo,omitempty"`
 	Commitish  string     `json:"sha,omitempty"`
-	Checks     []string   `json:"checks,omitempty"`
+	Checks     []Check    `json:"checks,omitempty"`
 	GitStorage GitStorage `json:"git_storage"`
 }

@@ -3,6 +3,7 @@ package docker
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"github.com/docker/distribution/uuid"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
@@ -20,6 +21,8 @@ type RunInformation struct {
 	WorkDir   string
 	RepoName  string
 	Commitish string
+	Mounts    map[string]string
+	Envs      map[string]string
 }
 
 type CreateContainerResult struct {
@@ -91,30 +94,59 @@ func (c *clientImpl) CreateContainer(info *RunInformation) (*CreateContainerResu
 	outputTarget := uuid.Generate().String()
 	outputFilePath := tempFile.Name()
 
-	res, err := c.d.ContainerCreate(context.Background(), &container.Config{
-		Env: []string{
-			"COCOV_WORKDIR=/work/" + workDirTarget,
-			"COCOV_REPO_NAME=" + info.RepoName,
-			"COCOV_COMMIT_SHA=" + info.Commitish,
-			"COCOV_OUTPUT_FILE=/tmp/" + outputTarget,
+	var envs []string
+	{
+		env := map[string]string{}
+		systemEnvs := map[string]string{
+			"COCOV_WORKDIR":     "/work/" + workDirTarget,
+			"COCOV_REPO_NAME":   info.RepoName,
+			"COCOV_COMMIT_SHA":  info.Commitish,
+			"COCOV_OUTPUT_FILE": "/tmp/" + outputTarget,
+		}
+
+		for k, v := range info.Envs {
+			env[k] = v
+		}
+		for k, v := range systemEnvs {
+			env[k] = v
+		}
+
+		envs = make([]string, 0, len(env))
+		for k, v := range env {
+			envs = append(envs, fmt.Sprintf("%s=%s", k, v))
+		}
+	}
+
+	mounts := make([]mount.Mount, 0, len(info.Mounts)+2)
+	mounts = append(mounts,
+		mount.Mount{
+			Type:     mount.TypeBind,
+			Source:   info.WorkDir,
+			Target:   "/work/" + workDirTarget,
+			ReadOnly: true,
 		},
+		mount.Mount{
+			Type:     mount.TypeBind,
+			Source:   outputFilePath,
+			Target:   "/tmp/" + outputTarget,
+			ReadOnly: false,
+		})
+
+	for from, to := range info.Mounts {
+		mounts = append(mounts, mount.Mount{
+			Type:     mount.TypeBind,
+			Source:   from,
+			Target:   to,
+			ReadOnly: true,
+		})
+	}
+
+	res, err := c.d.ContainerCreate(context.Background(), &container.Config{
+		Env:   envs,
 		Image: info.Image,
 	}, &container.HostConfig{
 		AutoRemove: false,
-		Mounts: []mount.Mount{
-			{
-				Type:     mount.TypeBind,
-				Source:   info.WorkDir,
-				Target:   "/work/" + workDirTarget,
-				ReadOnly: true,
-			},
-			{
-				Type:     mount.TypeBind,
-				Source:   outputFilePath,
-				Target:   "/tmp/" + outputTarget,
-				ReadOnly: false,
-			},
-		},
+		Mounts:     mounts,
 	}, nil, nil, "")
 
 	if err != nil {
