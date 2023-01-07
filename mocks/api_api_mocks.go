@@ -34,6 +34,21 @@ func (m *APIMock) EXPECT() *APIMockMockRecorder {
 	return m.recorder
 }
 
+// GetSecret mocks base method.
+func (m *APIMock) GetSecret(secret *redis.Mount) ([]byte, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetSecret", secret)
+	ret0, _ := ret[0].([]byte)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetSecret indicates an expected call of GetSecret.
+func (mr *APIMockMockRecorder) GetSecret(secret interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetSecret", reflect.TypeOf((*APIMock)(nil).GetSecret), secret)
+}
+
 // Ping mocks base method.
 func (m *APIMock) Ping() error {
 	m.ctrl.T.Helper()
@@ -49,7 +64,7 @@ func (mr *APIMockMockRecorder) Ping() *gomock.Call {
 }
 
 // PushIssues mocks base method.
-func (m *APIMock) PushIssues(job *redis.Job, issues map[string]interface{}, status string) error {
+func (m *APIMock) PushIssues(job *redis.Job, issues map[string]any, status string) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "PushIssues", job, issues, status)
 	ret0, _ := ret[0].(error)

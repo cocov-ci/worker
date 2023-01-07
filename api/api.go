@@ -56,6 +56,7 @@ type Client interface {
 	SetCheckRunning(job *redis.Job, plugin string) error
 	SetCheckSucceeded(job *redis.Job, plugin string) error
 	PushIssues(job *redis.Job, issues map[string]any, status string) error
+	GetSecret(secret *redis.Mount) ([]byte, error)
 }
 
 type api struct {
@@ -145,4 +146,14 @@ func (a api) PushIssues(job *redis.Job, issues map[string]any, status string) er
 	})
 
 	return err
+}
+
+func (a api) GetSecret(secret *redis.Mount) ([]byte, error) {
+	if secret.Kind != "secret" {
+		return nil, fmt.Errorf("cannot acquire non-secret mount %s", secret.Kind)
+	}
+
+	return a.do("GET", "/v1/secrets/data", &grequests.RequestOptions{
+		Params: map[string]string{"authorization": secret.Authorization},
+	})
 }
