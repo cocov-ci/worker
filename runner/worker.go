@@ -497,10 +497,9 @@ func (w *worker) serviceContainer(cID string, done func()) {
 	}
 
 	log.Info("Reading output data...")
-	var output []byte
-	output, err = os.ReadFile(cInfo.OutputFile)
+	output, err := w.docker.GetContainerOutput(cInfo)
 	if err != nil {
-		log.Error("Error reading output file", zap.Error(err), zap.String("output_file", cInfo.OutputFile))
+		log.Error("Error reading output file from container", zap.Error(err))
 		w.SetCheckError(cInfo.Image, fmt.Sprintf("Failed reading output data for %s: %s", cInfo.Image, err.Error()))
 		w.containerStatus.Set(cID, &containerResult{Error: fmt.Errorf("failed reading output file: %w", err)})
 		return

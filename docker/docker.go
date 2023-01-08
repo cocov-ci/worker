@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"archive/tar"
 	"bytes"
 	"context"
 	"fmt"
@@ -8,12 +9,13 @@ import (
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/mount"
+	"github.com/docker/docker/api/types/strslice"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
 	"go.uber.org/zap"
 	"io"
 	"os"
-	"runtime"
+	"path/filepath"
 	"time"
 )
 
@@ -38,6 +40,7 @@ type Client interface {
 	AbortAndRemove(container *CreateContainerResult) error
 	ContainerWait(id string) error
 	GetContainerResult(id string) (containerOutput *bytes.Buffer, exitStatus int, err error)
+	GetContainerOutput(result *CreateContainerResult) (output []byte, err error)
 	ContainerStart(id string) error
 }
 
@@ -93,26 +96,6 @@ func (c *clientImpl) CreateContainer(info *RunInformation) (*CreateContainerResu
 
 	workDirTarget := uuid.Generate().String()
 	outputTarget := uuid.Generate().String()
-	outputFilePath := tempFile.Name()
-	if err = os.Remove(outputFilePath); err != nil {
-		return nil, err
-	}
-
-	if f, err := os.Create(outputFilePath); err != nil {
-		return nil, err
-	} else {
-		if err = f.Close(); err != nil {
-			return nil, err
-		}
-	}
-
-	//goland:noinspection GoBoolExpressions
-	if runtime.GOOS != "darwin" {
-		// Suppressing this on darwin since Docker on Darwin is a different beast.
-		if err = os.Chown(outputFilePath, 1000, 1000); err != nil {
-			return nil, fmt.Errorf("failed chowning '%s': %w", outputFilePath, err)
-		}
-	}
 
 	var envs []string
 	{
@@ -137,20 +120,13 @@ func (c *clientImpl) CreateContainer(info *RunInformation) (*CreateContainerResu
 		}
 	}
 
-	mounts := make([]mount.Mount, 0, len(info.Mounts)+2)
-	mounts = append(mounts,
-		mount.Mount{
-			Type:     mount.TypeBind,
-			Source:   info.WorkDir,
-			Target:   "/work/" + workDirTarget,
-			ReadOnly: true,
-		},
-		mount.Mount{
-			Type:     mount.TypeBind,
-			Source:   outputFilePath,
-			Target:   "/tmp/" + outputTarget,
-			ReadOnly: false,
-		})
+	mounts := make([]mount.Mount, 0, len(info.Mounts)+1)
+	mounts = append(mounts, mount.Mount{
+		Type:     mount.TypeBind,
+		Source:   info.WorkDir,
+		Target:   "/work/" + workDirTarget,
+		ReadOnly: true,
+	})
 
 	for from, to := range info.Mounts {
 		mounts = append(mounts, mount.Mount{
@@ -168,17 +144,17 @@ func (c *clientImpl) CreateContainer(info *RunInformation) (*CreateContainerResu
 	}, &container.HostConfig{
 		AutoRemove: false,
 		Mounts:     mounts,
+		CapDrop:    strslice.StrSlice{"dac_override", "setgid", "setuid", "setpcap", "net_raw", "sys_chroot", "mknod", "audit_write"},
 	}, nil, nil, "")
 
 	if err != nil {
-		_ = os.Remove(outputFilePath)
 		return nil, err
 	}
 
-	c.log.Info("Created container", zap.String("id", res.ID), zap.String("output_file", outputFilePath))
+	c.log.Info("Created container", zap.String("id", res.ID))
 	return &CreateContainerResult{
 		ContainerID: res.ID,
-		OutputFile:  outputFilePath,
+		OutputFile:  "/tmp/" + outputTarget,
 		Image:       info.Image,
 	}, nil
 }
@@ -231,6 +207,49 @@ func (c *clientImpl) GetContainerResult(id string) (output *bytes.Buffer, exitSt
 	}
 
 	return
+}
+
+func (c *clientImpl) GetContainerOutput(result *CreateContainerResult) (output []byte, err error) {
+	reader, stat, err := c.d.CopyFromContainer(context.Background(), result.ContainerID, result.OutputFile)
+
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = reader.Close() }()
+
+	if stat.Mode.IsDir() {
+		return nil, fmt.Errorf("failed obtaining output: Process generated a directory at the output path, expected a file")
+	}
+
+	tr := tar.NewReader(reader)
+	ok := false
+	buffer := &bytes.Buffer{}
+	expectedFile := filepath.Base(result.OutputFile)
+	for {
+		hdr, err := tr.Next()
+
+		if err == io.EOF {
+			break
+		} else if err != nil {
+			return nil, fmt.Errorf("failed iterating tar archive: %w", err)
+		}
+
+		if hdr.Name != expectedFile {
+			continue
+		}
+
+		if _, err := io.Copy(buffer, tr); err != nil {
+			return nil, err
+		}
+		ok = true
+		break
+	}
+
+	if !ok {
+		return nil, fmt.Errorf("could not obtain output file from container: item was not found on tar data")
+	}
+
+	return buffer.Bytes(), err
 }
 
 func (c *clientImpl) ContainerStart(id string) error {

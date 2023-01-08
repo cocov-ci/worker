@@ -87,6 +87,7 @@ func makeTestServer(t *testing.T, endpoint string, handler http.HandlerFunc) Cli
 func makeJob() *redis.Job {
 	return &redis.Job{
 		JobID:      "jid",
+		RepoID:     10,
 		Org:        "org",
 		Repo:       "repo",
 		Commitish:  "sha",
@@ -104,7 +105,7 @@ func getJSON[T any](t *testing.T, from *http.Request) T {
 
 func TestSetCheckError(t *testing.T) {
 	ok := make(chan bool)
-	cli := makeTestServer(t, "/v1/repositories/repo/commits/sha/checks", func(w http.ResponseWriter, r *http.Request) {
+	cli := makeTestServer(t, "/v1/repositories/10/commits/sha/checks", func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, r.Method, "PATCH")
 		data := getJSON[map[string]string](t, r)
 		assert.Equal(t, "plugin", data["plugin_name"])
@@ -121,7 +122,7 @@ func TestSetCheckError(t *testing.T) {
 
 func TestSetCheckRunning(t *testing.T) {
 	ok := make(chan bool)
-	cli := makeTestServer(t, "/v1/repositories/repo/commits/sha/checks", func(w http.ResponseWriter, r *http.Request) {
+	cli := makeTestServer(t, "/v1/repositories/10/commits/sha/checks", func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, r.Method, "PATCH")
 		data := getJSON[map[string]string](t, r)
 		assert.Equal(t, "plugin", data["plugin_name"])
@@ -137,7 +138,7 @@ func TestSetCheckRunning(t *testing.T) {
 
 func TestSetCheckSucceeded(t *testing.T) {
 	ok := make(chan bool)
-	cli := makeTestServer(t, "/v1/repositories/repo/commits/sha/checks", func(w http.ResponseWriter, r *http.Request) {
+	cli := makeTestServer(t, "/v1/repositories/10/commits/sha/checks", func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, r.Method, "PATCH")
 		data := getJSON[map[string]string](t, r)
 		assert.Equal(t, "plugin", data["plugin_name"])
@@ -153,7 +154,7 @@ func TestSetCheckSucceeded(t *testing.T) {
 
 func TestPushIssues(t *testing.T) {
 	ok := make(chan bool)
-	cli := makeTestServer(t, "/v1/repositories/repo/issues", func(w http.ResponseWriter, r *http.Request) {
+	cli := makeTestServer(t, "/v1/repositories/10/issues", func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, r.Method, "PUT")
 		data := getJSON[map[string]any](t, r)
 		assert.Equal(t, "status", data["status"].(string))

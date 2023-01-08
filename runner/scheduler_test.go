@@ -21,7 +21,7 @@ func TestScheduler_RegisterJob(t *testing.T) {
 		Org:        "b",
 		Repo:       "c",
 		Commitish:  "d",
-		Checks:     []string{},
+		Checks:     []redis.Check{},
 		GitStorage: redis.GitStorage{},
 	}
 
@@ -37,7 +37,7 @@ func TestScheduler_DeregisterJob(t *testing.T) {
 		Org:        "b",
 		Repo:       "c",
 		Commitish:  "d",
-		Checks:     []string{},
+		Checks:     []redis.Check{},
 		GitStorage: redis.GitStorage{},
 	}
 

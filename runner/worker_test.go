@@ -9,9 +9,7 @@ import (
 	"github.com/cocov-ci/worker/test_helpers"
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
-	"os"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -27,13 +25,7 @@ type allMocks struct {
 }
 
 func makeOutputFile(t *testing.T) string {
-	output, err := os.CreateTemp("", "")
-	require.NoError(t, err)
-	output.Close()
-	t.Cleanup(func() {
-		_ = os.RemoveAll(output.Name())
-	})
-	return output.Name()
+	return "/tmp/test"
 }
 
 func makeMocks(t *testing.T) (*allMocks, *worker) {
@@ -65,6 +57,7 @@ func makeMocks(t *testing.T) (*allMocks, *worker) {
 		sleepFunc = time.Sleep
 	})
 
+	w.cleanup()
 	return m, w
 }
 
@@ -90,7 +83,7 @@ func TestBackoff(t *testing.T) {
 }
 
 func makeJob() *redis.Job {
-	return &redis.Job{JobID: "a", Org: "b", Repo: "c", Commitish: "d", Checks: []string{"foo"}, GitStorage: redis.GitStorage{}}
+	return &redis.Job{JobID: "a", Org: "b", Repo: "c", Commitish: "d", Checks: []redis.Check{{Plugin: "foo"}}, GitStorage: redis.GitStorage{}}
 }
 
 // The intention here is to test the whole run loop by first returning a job
@@ -113,6 +106,7 @@ func TestWorker_Run(t *testing.T) {
 
 	// Docker setup
 	m.docker.EXPECT().PullImage("foo").AnyTimes().Return(fmt.Errorf("boom"))
+	m.api.EXPECT().SetCheckError(gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes().Return(nil)
 
 	// Test
 	test_helpers.Timeout(t, 5*time.Second, w.Run)
@@ -160,7 +154,7 @@ func TestWorker_RunPrepareRuntimeFailure(t *testing.T) {
 func TestWorker_RunPrepareRuntimeFailureCleanup(t *testing.T) {
 	m, w := makeMocks(t)
 	w.job = makeJob()
-	w.job.Checks = append(w.job.Checks, "bar")
+	w.job.Checks = append(w.job.Checks, redis.Check{Plugin: "bar"})
 
 	fooContainerInfo := &docker.CreateContainerResult{
 		ContainerID: "1",
@@ -200,7 +194,7 @@ func TestWorker_RunPrepareRuntimeFailureCleanup(t *testing.T) {
 func TestWorker_RunPrepareRuntimeFailureCleanupFailure(t *testing.T) {
 	m, w := makeMocks(t)
 	w.job = makeJob()
-	w.job.Checks = append(w.job.Checks, "bar")
+	w.job.Checks = append(w.job.Checks, redis.Check{Plugin: "bar"})
 
 	fooContainerInfo := &docker.CreateContainerResult{
 		ContainerID: "1",
@@ -266,7 +260,8 @@ func TestWorkerServiceContainerSetRunningFailure(t *testing.T) {
 	m.docker.EXPECT().ContainerWait("a").Return(fmt.Errorf("boom"))
 
 	// API setup
-	m.api.EXPECT().SetCheckRunning(w.job, "b").Return(fmt.Errorf("boom"))
+	// SetCheckRunning may be called several times due to the backoff mechanism
+	m.api.EXPECT().SetCheckRunning(w.job, "b").AnyTimes().Return(fmt.Errorf("boom"))
 	m.api.EXPECT().SetCheckError(w.job, "b", "Failed waiting container result for b: boom").Return(nil)
 
 	w.serviceContainer("a", func() {})
@@ -307,12 +302,11 @@ func TestWorkServiceReadOutputFails(t *testing.T) {
 		OutputFile:  makeOutputFile(t),
 	}
 
-	require.NoError(t, os.RemoveAll(w.containers["a"].OutputFile))
-
 	// Docker setup
 	m.docker.EXPECT().ContainerStart("a").Return(nil)
 	m.docker.EXPECT().ContainerWait("a").Return(nil)
 	m.docker.EXPECT().GetContainerResult("a").Return(&bytes.Buffer{}, 0, nil)
+	m.docker.EXPECT().GetContainerOutput(w.containers["a"]).Return(nil, fmt.Errorf("boom"))
 
 	// API setup
 	m.api.EXPECT().SetCheckRunning(w.job, "b").Return(nil)
@@ -341,6 +335,7 @@ func TestWorkServiceRemoveContainerOK(t *testing.T) {
 	m.docker.EXPECT().ContainerStart("a").Return(nil)
 	m.docker.EXPECT().ContainerWait("a").Return(nil)
 	m.docker.EXPECT().GetContainerResult("a").Return(&bytes.Buffer{}, 0, nil)
+	m.docker.EXPECT().GetContainerOutput(w.containers["a"]).Return([]byte{}, nil)
 	m.docker.EXPECT().AbortAndRemove(w.containers["a"]).Return(nil)
 
 	// API setup
@@ -373,6 +368,7 @@ func TestWorkServiceRemoveContainerFailure(t *testing.T) {
 	m.docker.EXPECT().ContainerStart("a").Return(nil)
 	m.docker.EXPECT().ContainerWait("a").Return(nil)
 	m.docker.EXPECT().GetContainerResult("a").Return(&bytes.Buffer{}, 0, nil)
+	m.docker.EXPECT().GetContainerOutput(w.containers["a"]).Return([]byte{}, nil)
 	m.docker.EXPECT().AbortAndRemove(w.containers["a"]).Return(fmt.Errorf("nope"))
 
 	// API setup
@@ -491,9 +487,8 @@ func TestAggregateResults_SetCheckSucceededFailure(t *testing.T) {
 		Image:           "img",
 	})
 
-	gomock.InOrder(
-		m.api.EXPECT().SetCheckSucceeded(w.job, "img").Return(fmt.Errorf("boom")),
-	)
+	// CheckSetSucceeded may be called several times due to the backoff mechanism
+	m.api.EXPECT().SetCheckSucceeded(w.job, "img").AnyTimes().Return(fmt.Errorf("boom"))
 	final, checks := w.aggregateResults()
 	assert.NotEmpty(t, checks)
 	assert.Equal(t, "processed", final)
@@ -529,12 +524,14 @@ func TestWorker_RunFull(t *testing.T) {
 		OutputFile:  makeOutputFile(t),
 	}
 	m.docker.EXPECT().CreateContainer(gomock.Any()).Return(createResult, nil)
+	w.containers = map[string]*docker.CreateContainerResult{"a": createResult}
 
 	// serviceContainer
 	m.docker.EXPECT().ContainerStart("a").Return(nil)
 	m.api.EXPECT().SetCheckRunning(w.job, "foo").Return(nil)
 	m.docker.EXPECT().ContainerWait("a").Return(nil)
 	m.docker.EXPECT().GetContainerResult("a").Return(&bytes.Buffer{}, 0, nil)
+	m.docker.EXPECT().GetContainerOutput(w.containers["a"]).Return([]byte{}, nil)
 	m.docker.EXPECT().AbortAndRemove(createResult).AnyTimes().Return(nil)
 
 	// aggregateResults

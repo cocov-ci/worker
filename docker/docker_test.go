@@ -1,6 +1,9 @@
 package docker
 
 import (
+	"bytes"
+	"encoding/json"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 	"os"
@@ -16,7 +19,7 @@ func makeClient(t *testing.T) *clientImpl {
 
 func TestDockerPullImage(t *testing.T) {
 	c := makeClient(t)
-	err := c.PullImage("alpine")
+	err := c.PullImage("cocov/dummy:v0.1")
 	require.NoError(t, err)
 }
 
@@ -27,9 +30,9 @@ func TestCreateContainer(t *testing.T) {
 	defer os.RemoveAll(work)
 
 	r := RunInformation{
-		Image:     "alpine",
+		Image:     "cocov/dummy:v0.1",
 		WorkDir:   work,
-		RepoName:  "hello",
+		RepoName:  "%#COCOV_WORKER_DOCKER_TEST",
 		Commitish: "test",
 	}
 
@@ -46,8 +49,17 @@ func TestCreateContainer(t *testing.T) {
 
 	output, exitStatus, err := c.GetContainerResult(result.ContainerID)
 	require.Nil(t, err)
-	require.Empty(t, output.Bytes())
+	require.Equal(t, []byte("Success.\n"), output.Bytes())
 	require.Zero(t, exitStatus)
+
+	data, err := c.GetContainerOutput(result)
+	require.NoError(t, err)
+
+	// Content should be parseable JSON
+	data = bytes.TrimSuffix(data, []byte{0x00})
+	var obj map[string]interface{}
+	require.NoError(t, json.Unmarshal(data, &obj))
+	assert.Equal(t, "foo", obj["file"].(string))
 
 	err = c.AbortAndRemove(result)
 	require.NoError(t, err)

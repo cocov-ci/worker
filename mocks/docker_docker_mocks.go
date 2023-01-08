@@ -92,6 +92,21 @@ func (mr *DockerMockMockRecorder) CreateContainer(info interface{}) *gomock.Call
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateContainer", reflect.TypeOf((*DockerMock)(nil).CreateContainer), info)
 }
 
+// GetContainerOutput mocks base method.
+func (m *DockerMock) GetContainerOutput(result *docker.CreateContainerResult) ([]byte, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetContainerOutput", result)
+	ret0, _ := ret[0].([]byte)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetContainerOutput indicates an expected call of GetContainerOutput.
+func (mr *DockerMockMockRecorder) GetContainerOutput(result interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetContainerOutput", reflect.TypeOf((*DockerMock)(nil).GetContainerOutput), result)
+}
+
 // GetContainerResult mocks base method.
 func (m *DockerMock) GetContainerResult(id string) (*bytes.Buffer, int, error) {
 	m.ctrl.T.Helper()
