@@ -103,7 +103,7 @@ func (a api) Ping() error {
 }
 
 func (a api) SetCheckError(job *redis.Job, plugin, reason string) error {
-	_, err := a.do("PATCH", fmt.Sprintf("/v1/repositories/%s/commits/%s/checks", job.Repo, job.Commitish), &grequests.RequestOptions{
+	_, err := a.do("PATCH", fmt.Sprintf("/v1/repositories/%d/commits/%s/checks", job.RepoID, job.Commitish), &grequests.RequestOptions{
 		JSON: map[string]any{
 			"plugin_name":  strings.SplitN(plugin, ":", 2)[0],
 			"status":       "errored",
@@ -115,7 +115,7 @@ func (a api) SetCheckError(job *redis.Job, plugin, reason string) error {
 }
 
 func (a api) SetCheckRunning(job *redis.Job, plugin string) error {
-	_, err := a.do("PATCH", fmt.Sprintf("/v1/repositories/%s/commits/%s/checks", job.Repo, job.Commitish), &grequests.RequestOptions{
+	_, err := a.do("PATCH", fmt.Sprintf("/v1/repositories/%d/commits/%s/checks", job.RepoID, job.Commitish), &grequests.RequestOptions{
 		JSON: map[string]any{
 			"plugin_name": strings.SplitN(plugin, ":", 2)[0],
 			"status":      "running",
@@ -126,7 +126,7 @@ func (a api) SetCheckRunning(job *redis.Job, plugin string) error {
 }
 
 func (a api) SetCheckSucceeded(job *redis.Job, plugin string) error {
-	_, err := a.do("PATCH", fmt.Sprintf("/v1/repositories/%s/commits/%s/checks", job.Repo, job.Commitish), &grequests.RequestOptions{
+	_, err := a.do("PATCH", fmt.Sprintf("/v1/repositories/%d/commits/%s/checks", job.RepoID, job.Commitish), &grequests.RequestOptions{
 		JSON: map[string]any{
 			"plugin_name": strings.SplitN(plugin, ":", 2)[0],
 			"status":      "succeeded",
@@ -137,7 +137,7 @@ func (a api) SetCheckSucceeded(job *redis.Job, plugin string) error {
 }
 
 func (a api) PushIssues(job *redis.Job, issues map[string]any, status string) error {
-	_, err := a.do("PUT", fmt.Sprintf("/v1/repositories/%s/issues", job.Repo), &grequests.RequestOptions{
+	_, err := a.do("PUT", fmt.Sprintf("/v1/repositories/%d/issues", job.RepoID), &grequests.RequestOptions{
 		JSON: map[string]any{
 			"status": status,
 			"sha":    job.Commitish,
