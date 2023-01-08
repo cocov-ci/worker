@@ -104,7 +104,7 @@ func inflateBrotli(source string, then func(string) error) error {
 	tmpPath = tmpPath + ".tar"
 
 	if _, err := execute.Exec([]string{"brotli", "-d", source, "-o", tmpPath}, nil); err != nil {
-		return err
+		return fmt.Errorf("executing brotli failed: %w", err)
 	}
 
 	defer func() { _ = os.Remove(tmpPath) }()
@@ -118,8 +118,8 @@ func untar(source, dest string) error {
 	}
 
 	if _, err := execute.Exec([]string{"tar", "--strip-components=1", "-xf", source}, &execute.Opts{Cwd: dest}); err != nil {
-		return err
+		return fmt.Errorf("executing tar failed: %w", err)
 	}
-	_, err := execute.Exec([]string{"chown", "-Rf", "1000:1000", dest}, nil)
-	return err
+
+	return nil
 }
