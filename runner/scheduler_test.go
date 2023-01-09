@@ -1,12 +1,14 @@
 package runner
 
 import (
-	"github.com/cocov-ci/worker/redis"
-	"github.com/cocov-ci/worker/test_helpers"
-	"github.com/stretchr/testify/assert"
-	"go.uber.org/zap"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"go.uber.org/zap"
+
+	"github.com/cocov-ci/worker/redis"
+	"github.com/cocov-ci/worker/test_helpers"
 )
 
 func makeScheduler() *Scheduler {

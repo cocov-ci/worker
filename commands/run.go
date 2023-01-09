@@ -1,15 +1,17 @@
 package commands
 
 import (
+	"os"
+
+	"github.com/urfave/cli/v2"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+
 	"github.com/cocov-ci/worker/api"
 	"github.com/cocov-ci/worker/docker"
 	"github.com/cocov-ci/worker/redis"
 	"github.com/cocov-ci/worker/runner"
 	"github.com/cocov-ci/worker/storage"
-	"github.com/urfave/cli/v2"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
-	"os"
 )
 
 func Run(ctx *cli.Context) error {
@@ -35,7 +37,7 @@ func Run(ctx *cli.Context) error {
 		return err
 	}
 
-	defer logger.Sync()
+	defer func() { _ = logger.Sync() }()
 	zap.ReplaceGlobals(logger)
 
 	redisClient, err := redis.New(redisURL)

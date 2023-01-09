@@ -2,13 +2,15 @@ package api
 
 import (
 	"encoding/json"
-	"github.com/cocov-ci/worker/redis"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"net/http"
 	"testing"
+
+	"github.com/heyvito/httpie"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/cocov-ci/worker/redis"
 )
-import "github.com/heyvito/httpie"
 
 func httpStatusCode(code int, body string) func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {

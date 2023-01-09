@@ -1,12 +1,14 @@
 package test_helpers
 
 import (
-	"github.com/cocov-ci/worker/execute"
-	"github.com/stretchr/testify/require"
 	"os"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/cocov-ci/worker/execute"
 )
 
 func Timeout(t *testing.T, d time.Duration, fn func()) {

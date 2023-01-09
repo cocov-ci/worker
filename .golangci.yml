@@ -1,0 +1,6 @@
+linters-settings:
+  gosec:
+    excludes:
+      - G505 # Blocklisted import crypto/sha1
+      - G401 # Use of weak cryptographic primitive
+      - G110 # Potential DoS vulnerability via decompression bomb

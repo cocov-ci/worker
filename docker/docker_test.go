@@ -4,14 +4,16 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"github.com/cocov-ci/worker/support"
-	"github.com/cocov-ci/worker/test_helpers"
+	"path/filepath"
+	"testing"
+
 	"github.com/docker/docker/api/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
-	"path/filepath"
-	"testing"
+
+	"github.com/cocov-ci/worker/support"
+	"github.com/cocov-ci/worker/test_helpers"
 )
 
 func makeClient(t *testing.T) *clientImpl {

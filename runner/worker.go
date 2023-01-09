@@ -5,17 +5,19 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
-	"github.com/cocov-ci/worker/api"
-	"github.com/cocov-ci/worker/docker"
-	"github.com/cocov-ci/worker/redis"
-	"github.com/cocov-ci/worker/storage"
-	"go.uber.org/zap"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	"go.uber.org/zap"
+
+	"github.com/cocov-ci/worker/api"
+	"github.com/cocov-ci/worker/docker"
+	"github.com/cocov-ci/worker/redis"
+	"github.com/cocov-ci/worker/storage"
 )
 
 // This is here just to make sure we can not really sleep during tests.
@@ -314,6 +316,7 @@ func (w *worker) obtainSecrets() error {
 
 			var secretData []byte
 			err = withBackoff(w.log, "obtaining secret", defaultAttemptCount, func() error {
+				m := m
 				data, err := w.api.GetSecret(&m)
 				if err != nil {
 					return err

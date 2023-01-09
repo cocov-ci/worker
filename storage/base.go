@@ -4,10 +4,11 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
-	"github.com/cocov-ci/worker/execute"
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/cocov-ci/worker/execute"
 )
 
 type Base interface {

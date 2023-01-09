@@ -1,13 +1,15 @@
 package runner
 
 import (
+	"sync"
+	"time"
+
+	"go.uber.org/zap"
+
 	"github.com/cocov-ci/worker/api"
 	"github.com/cocov-ci/worker/docker"
 	"github.com/cocov-ci/worker/redis"
 	"github.com/cocov-ci/worker/storage"
-	"go.uber.org/zap"
-	"sync"
-	"time"
 )
 
 type IndirectScheduler interface {

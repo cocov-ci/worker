@@ -1,13 +1,15 @@
 package storage
 
 import (
-	"github.com/cocov-ci/worker/test_helpers"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+
+	"github.com/cocov-ci/worker/test_helpers"
 )
 
 var env = map[string]string{

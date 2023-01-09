@@ -2,10 +2,11 @@ package main
 
 import (
 	"fmt"
-	"github.com/cocov-ci/worker/commands"
 	"os"
 
 	"github.com/urfave/cli/v2"
+
+	"github.com/cocov-ci/worker/commands"
 )
 
 func envs(base string) []string {

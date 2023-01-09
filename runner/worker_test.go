@@ -3,16 +3,18 @@ package runner
 import (
 	"bytes"
 	"fmt"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/golang/mock/gomock"
+	"github.com/stretchr/testify/assert"
+	"go.uber.org/zap"
+
 	"github.com/cocov-ci/worker/docker"
 	"github.com/cocov-ci/worker/mocks"
 	"github.com/cocov-ci/worker/redis"
 	"github.com/cocov-ci/worker/test_helpers"
-	"github.com/golang/mock/gomock"
-	"github.com/stretchr/testify/assert"
-	"go.uber.org/zap"
-	"sync/atomic"
-	"testing"
-	"time"
 )
 
 type allMocks struct {

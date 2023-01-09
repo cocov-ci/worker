@@ -3,9 +3,10 @@ package runner
 import (
 	"bytes"
 	"encoding/json"
+	"testing"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"testing"
 )
 
 func TestParseReportItems(t *testing.T) {

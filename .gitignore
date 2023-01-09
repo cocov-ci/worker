@@ -1,2 +1,4 @@
 c.out
 coverage.html
+.go-oif
+.golangci-lint

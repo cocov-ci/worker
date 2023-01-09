@@ -2,13 +2,14 @@ package storage
 
 import (
 	"context"
+	"os"
+	"strings"
+
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"go.uber.org/zap"
-	"os"
-	"strings"
 )
 
 func NewS3(bucketName string) (Base, error) {

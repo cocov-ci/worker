@@ -3,11 +3,13 @@ package api
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/cocov-ci/worker/redis"
-	"github.com/levigross/grequests"
-	"go.uber.org/zap"
 	"net/url"
 	"strings"
+
+	"github.com/levigross/grequests"
+	"go.uber.org/zap"
+
+	"github.com/cocov-ci/worker/redis"
 )
 
 type ServiceError struct {

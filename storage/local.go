@@ -2,9 +2,10 @@ package storage
 
 import (
 	"fmt"
-	"go.uber.org/zap"
 	"os"
 	"path/filepath"
+
+	"go.uber.org/zap"
 )
 
 func NewLocal(basePath string) (Base, error) {

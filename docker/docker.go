@@ -5,9 +5,11 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/cocov-ci/worker/execute"
-	"github.com/cocov-ci/worker/storage"
-	"github.com/cocov-ci/worker/support"
+	"io"
+	"os"
+	"path/filepath"
+	"time"
+
 	"github.com/docker/distribution/uuid"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
@@ -17,10 +19,10 @@ import (
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
 	"go.uber.org/zap"
-	"io"
-	"os"
-	"path/filepath"
-	"time"
+
+	"github.com/cocov-ci/worker/execute"
+	"github.com/cocov-ci/worker/storage"
+	"github.com/cocov-ci/worker/support"
 )
 
 type RunInformation struct {

@@ -3,12 +3,14 @@ package redis
 import (
 	"context"
 	"encoding/json"
-	"github.com/cocov-ci/worker/test_helpers"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/cocov-ci/worker/test_helpers"
 )
 
 func makeClient(t *testing.T) *client {
