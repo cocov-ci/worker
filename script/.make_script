@@ -1,0 +1,4 @@
+#!/bin/ash
+
+chmod +x "$ROOT_PATH"/script
+tar -cvf /output.tar "$ROOT_PATH"/script

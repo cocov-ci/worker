@@ -2,11 +2,15 @@ package docker
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"github.com/cocov-ci/worker/support"
+	"github.com/cocov-ci/worker/test_helpers"
+	"github.com/docker/docker/api/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
-	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -24,22 +28,28 @@ func TestDockerPullImage(t *testing.T) {
 }
 
 func TestCreateContainer(t *testing.T) {
-	work, err := os.MkdirTemp("", "")
+	c := makeClient(t)
+	volume, err := c.PrepareVolume(filepath.Join(test_helpers.GitRoot(t), "storage", "fixtures", "test.tar.br"))
 	require.NoError(t, err)
 
-	defer os.RemoveAll(work)
-
 	r := RunInformation{
-		Image:     "cocov/dummy:v0.1",
-		WorkDir:   work,
-		RepoName:  "%#COCOV_WORKER_DOCKER_TEST",
-		Commitish: "test",
+		Image:        "alpine",
+		SourceVolume: volume,
+		RepoName:     "%#COCOV_WORKER_DOCKER_TEST",
+		Commitish:    "test",
+		Command:      "/tmp/script",
 	}
 
-	c := makeClient(t)
 	result, err := c.CreateContainer(&r)
 	require.NoError(t, err)
 	require.NotNil(t, result)
+
+	// Needs dummy script
+	dummy, err := support.Scripts.Open("dummy.tar")
+	require.NoError(t, err)
+
+	err = c.d.CopyToContainer(context.Background(), result.ContainerID, "/", dummy, types.CopyToContainerOptions{})
+	require.NoError(t, err)
 
 	err = c.ContainerStart(result.ContainerID)
 	require.NoError(t, err)
@@ -63,4 +73,12 @@ func TestCreateContainer(t *testing.T) {
 
 	err = c.AbortAndRemove(result)
 	require.NoError(t, err)
+}
+
+func TestClientImpl_PrepareVolume(t *testing.T) {
+	root := filepath.Join(test_helpers.GitRoot(t), "storage", "fixtures", "test.tar.br")
+	c := makeClient(t)
+	vol, err := c.PrepareVolume(root)
+	require.NoError(t, err)
+	require.NoError(t, c.RemoveVolume(vol))
 }

@@ -1,11 +1,11 @@
 package storage
 
 import (
+	"github.com/cocov-ci/worker/test_helpers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -53,8 +53,7 @@ func TestS3Download(t *testing.T) {
 }
 
 func TestS3Storage_DownloadCommit(t *testing.T) {
-	tmp, err := os.MkdirTemp("", "")
-	require.NoError(t, err)
+	tmp := test_helpers.TmpPath(t)
 
 	prepareS3(t, func(t *testing.T) {
 		s, err := NewS3("cocov-storage")
@@ -62,8 +61,5 @@ func TestS3Storage_DownloadCommit(t *testing.T) {
 
 		err = s.DownloadCommit("repo", "9cff62ad797c372277f6c6b71d10e643947b5340", tmp)
 		assert.NoError(t, err)
-		f, err := os.ReadFile(filepath.Join(tmp, "README"))
-		assert.NoError(t, err)
-		assert.True(t, strings.HasPrefix(string(f), "# Cocov"))
 	})
 }

@@ -1,0 +1,13 @@
+#!/bin/bash
+set -e
+
+container=$(docker create -e ROOT_PATH=/tmp alpine /root/make_script)
+
+docker cp support/dummy.sh "$container":/tmp/script
+docker cp script/.make_script "$container":/root/make_script
+
+docker start "$container"
+docker wait "$container"
+
+docker cp "$container":/output.tar support/dummy.tar
+docker rm "$container"

@@ -84,13 +84,6 @@ func (s S3Storage) DownloadCommit(repository, commitish, into string) error {
 		zap.String("key", brotliPath),
 		zap.Stringp("bucket", s.bucketName))
 
-	outBrotli, err := os.CreateTemp("", "img.*.tar.br")
-	if err != nil {
-		return err
-	}
-
-	defer func(name string) { _ = os.Remove(name) }(outBrotli.Name())
-
 	outSha, err := os.CreateTemp("", "img.*.tar.br.shasum")
 	if err != nil {
 		return err
@@ -98,11 +91,16 @@ func (s S3Storage) DownloadCommit(repository, commitish, into string) error {
 
 	defer func(name string) { _ = os.Remove(name) }(outSha.Name())
 
-	if err = s.download(brotliPath, outBrotli); err != nil {
+	f, err := os.Create(into)
+	if err != nil {
 		return err
 	}
 
-	if err = outBrotli.Close(); err != nil {
+	if err = s.download(brotliPath, f); err != nil {
+		return err
+	}
+
+	if err = f.Close(); err != nil {
 		return err
 	}
 
@@ -114,11 +112,9 @@ func (s S3Storage) DownloadCommit(repository, commitish, into string) error {
 		return err
 	}
 
-	if err := validateSha(outSha.Name(), outBrotli.Name()); err != nil {
+	if err = validateSha(outSha.Name(), f.Name()); err != nil {
 		return err
 	}
 
-	return inflateBrotli(outBrotli.Name(), func(tarPath string) error {
-		return untar(tarPath, into)
-	})
+	return nil
 }

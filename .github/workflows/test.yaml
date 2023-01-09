@@ -31,40 +31,8 @@ jobs:
     - name: Bootstrap MinIO server
       run: script/bootstrap-minio minio
 
+    - name: Download image
+      run: docker pull alpine
+
     - name: Test
       run: go test -v ./...
-
-  build-support-images:
-    if: github.ref == 'refs/heads/master'
-    runs-on: ubuntu-latest
-
-    strategy:
-      matrix:
-        file: [dummy, volume-extractor]
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
-
-    - name: Setup QEMU
-      uses: docker/setup-qemu-action@v2
-
-    - name: Setup Buildx
-      uses: docker/setup-buildx-action@v2
-
-    - name: Login to Docker Hub
-      uses: docker/login-action@v2
-      with:
-        username: ${{ secrets.DOCKER_LOGIN }}
-        password: ${{ secrets.DOCKER_PASSWORD }}
-
-    - name: Build and push
-      uses: docker/build-push-action@v3
-      with:
-        context: support-containers
-        push: true
-        file: support-containers/${{ matrix.file }}.dockerfile
-        tags: cocov/${{ matrix.file }}:v0.1
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
-        platforms: linux/amd64,linux/arm64

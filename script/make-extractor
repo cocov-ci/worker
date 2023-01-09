@@ -1,0 +1,13 @@
+#!/bin/bash
+set -e
+
+container=$(docker create -e ROOT_PATH=/root alpine /root/make_script)
+
+docker cp support/extractor.sh "$container":/root/script
+docker cp script/.make_script "$container":/root/make_script
+
+docker start "$container"
+docker wait "$container"
+
+docker cp "$container":/output.tar support/extractor.tar
+docker rm "$container"

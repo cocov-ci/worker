@@ -89,7 +89,7 @@ func validateSha(sumPath, itemPath string) error {
 	return nil
 }
 
-func inflateBrotli(source string, then func(string) error) error {
+func InflateBrotli(source string, then func(string) error) error {
 	rawTmpFile, err := os.CreateTemp("", "")
 	if err != nil {
 		return err

@@ -57,6 +57,12 @@ func Run(ctx *cli.Context) error {
 		return err
 	}
 
+	logger.Info("Preparing system images...")
+	if err = dockerClient.PullImage("alpine"); err != nil {
+		logger.Error("Failed downloading image", zap.Error(err))
+		return err
+	}
+
 	apiClient, err := api.New(apiURL, serviceToken)
 	if err != nil {
 		logger.Error("Failed initializing API client", zap.Error(err))

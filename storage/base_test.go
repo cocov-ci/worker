@@ -1,7 +1,6 @@
 package storage
 
 import (
-	"fmt"
 	"github.com/cocov-ci/worker/test_helpers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -66,7 +65,7 @@ func TestInflateBrotli(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(tmpdir)
 
-	err = inflateBrotli(filepath.Join(root, "storage", "fixtures", "test.tar.br"), func(s string) error {
+	err = InflateBrotli(filepath.Join(root, "storage", "fixtures", "test.tar.br"), func(s string) error {
 		return untar(s, tmpdir)
 	})
 	require.NoError(t, err)
@@ -75,6 +74,4 @@ func TestInflateBrotli(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "This is a test", string(f))
-	fmt.Println(tmpdir)
-
 }

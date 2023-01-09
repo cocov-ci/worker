@@ -31,23 +31,23 @@ func makeOutputFile(t *testing.T) string {
 func makeMocks(t *testing.T) (*allMocks, *worker) {
 	ctrl := gomock.NewController(t)
 	zap.ReplaceGlobals(zap.NewNop())
-	docker := mocks.NewDockerMock(ctrl)
+	dockerMock := mocks.NewDockerMock(ctrl)
 	api := mocks.NewAPIMock(ctrl)
 	storage := mocks.NewStorageMock(ctrl)
-	redis := mocks.NewRedisMock(ctrl)
+	redisMock := mocks.NewRedisMock(ctrl)
 	scheduler := mocks.NewIndirectScheduler(ctrl)
 	isDone := &atomic.Bool{}
 
 	m := &allMocks{
-		docker:    docker,
+		docker:    dockerMock,
 		api:       api,
 		storage:   storage,
-		redis:     redis,
+		redis:     redisMock,
 		scheduler: scheduler,
 		isDone:    isDone,
 	}
 
-	w := newWorker(zap.L(), 0, scheduler, docker, api, storage, redis, func() {
+	w := newWorker(zap.L(), 0, scheduler, dockerMock, api, storage, redisMock, func() {
 		isDone.Store(true)
 	})
 
@@ -142,6 +142,10 @@ func TestWorker_RunPrepareRuntimeFailure(t *testing.T) {
 		assert.Equal(t, "d", ri.Commitish)
 		return nil, fmt.Errorf("boom")
 	})
+	volume := &docker.PrepareVolumeResult{VolumeID: "yay"}
+	m.docker.EXPECT().PrepareVolume(gomock.Any()).DoAndReturn(func(string) (*docker.PrepareVolumeResult, error) {
+		return volume, nil
+	})
 
 	// Storage Setup
 	m.storage.EXPECT().DownloadCommit("c", "d", gomock.Any()).Times(1).Return(nil)
@@ -167,6 +171,11 @@ func TestWorker_RunPrepareRuntimeFailureCleanup(t *testing.T) {
 		m.docker.EXPECT().PullImage("foo").Times(1).Return(nil),
 		m.docker.EXPECT().PullImage("bar").Times(1).Return(nil),
 	)
+
+	volume := &docker.PrepareVolumeResult{VolumeID: "yay"}
+	m.docker.EXPECT().PrepareVolume(gomock.Any()).DoAndReturn(func(string) (*docker.PrepareVolumeResult, error) {
+		return volume, nil
+	})
 
 	m.docker.EXPECT().CreateContainer(gomock.Any()).Times(2).DoAndReturn(func(ri *docker.RunInformation) (*docker.CreateContainerResult, error) {
 		if ri.Image == "foo" {
@@ -518,6 +527,10 @@ func TestWorker_RunFull(t *testing.T) {
 	m.storage.EXPECT().DownloadCommit("c", "d", gomock.Any()).AnyTimes().Return(nil)
 
 	// prepareRuntime
+	volume := &docker.PrepareVolumeResult{VolumeID: "yay"}
+	m.docker.EXPECT().PrepareVolume(gomock.Any()).DoAndReturn(func(string) (*docker.PrepareVolumeResult, error) {
+		return volume, nil
+	})
 	createResult := &docker.CreateContainerResult{
 		ContainerID: "a",
 		Image:       "foo",

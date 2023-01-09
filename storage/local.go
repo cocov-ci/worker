@@ -46,8 +46,5 @@ func (l LocalStorage) DownloadCommit(repository, commitish, into string) error {
 	if err := validateSha(shaPath, itemPath); err != nil {
 		return err
 	}
-
-	return inflateBrotli(itemPath, func(tarPath string) error {
-		return untar(tarPath, into)
-	})
+	return os.Link(itemPath, into)
 }

@@ -5,11 +5,15 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/cocov-ci/worker/execute"
+	"github.com/cocov-ci/worker/storage"
+	"github.com/cocov-ci/worker/support"
 	"github.com/docker/distribution/uuid"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/api/types/strslice"
+	"github.com/docker/docker/api/types/volume"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
 	"go.uber.org/zap"
@@ -20,18 +24,23 @@ import (
 )
 
 type RunInformation struct {
-	Image     string
-	WorkDir   string
-	RepoName  string
-	Commitish string
-	Mounts    map[string]string
-	Envs      map[string]string
+	Image        string
+	RepoName     string
+	Commitish    string
+	Mounts       map[string]string
+	Envs         map[string]string
+	SourceVolume *PrepareVolumeResult
+	Command      string
 }
 
 type CreateContainerResult struct {
 	ContainerID string
 	Image       string
 	OutputFile  string
+}
+
+type PrepareVolumeResult struct {
+	VolumeID string
 }
 
 type Client interface {
@@ -42,6 +51,8 @@ type Client interface {
 	GetContainerResult(id string) (containerOutput *bytes.Buffer, exitStatus int, err error)
 	GetContainerOutput(result *CreateContainerResult) (output []byte, err error)
 	ContainerStart(id string) error
+	RemoveVolume(vol *PrepareVolumeResult) error
+	PrepareVolume(brotliPath string) (*PrepareVolumeResult, error)
 }
 
 func New(host string) (Client, error) {
@@ -72,6 +83,119 @@ func New(host string) (Client, error) {
 type clientImpl struct {
 	log *zap.Logger
 	d   *client.Client
+}
+
+func (c *clientImpl) PrepareVolume(brotliPath string) (*PrepareVolumeResult, error) {
+	volumeName := uuid.Generate().String()
+	vol, err := c.d.VolumeCreate(context.Background(), volume.VolumeCreateBody{
+		Driver: "local",
+		Labels: nil,
+		Name:   volumeName,
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("failed creating volume: %w", err)
+	}
+
+	removeVolume := func() {
+		if err := c.d.VolumeRemove(context.Background(), vol.Name, true); err != nil {
+			c.log.Warn("Failed removing volume", zap.String("name", vol.Name), zap.Error(err))
+		}
+	}
+
+	cont, err := c.d.ContainerCreate(context.Background(), &container.Config{
+		Image: "alpine",
+		Cmd:   []string{"/root/script"},
+	}, &container.HostConfig{
+		Mounts: []mount.Mount{
+			{
+				Type:   mount.TypeVolume,
+				Source: vol.Name,
+				Target: "/volume",
+			},
+		},
+	}, nil, nil, "")
+
+	if err != nil {
+		removeVolume()
+		return nil, fmt.Errorf("failed creating container: %w", err)
+	}
+
+	removeContainer := func(volume bool) {
+		if err := c.d.ContainerRemove(context.Background(), cont.ID, types.ContainerRemoveOptions{
+			Force: true,
+		}); err != nil {
+			c.log.Warn("Failed removing container", zap.String("id", cont.ID), zap.Error(err))
+		}
+		if volume {
+			removeVolume()
+		}
+	}
+
+	extractorTar, err := support.Scripts.Open("extractor.tar")
+	if err != nil {
+		removeContainer(true)
+		return nil, fmt.Errorf("error obtaining extractor.tar from embedded FS: %w", err)
+	}
+
+	if err = c.d.CopyToContainer(context.Background(), cont.ID, "/", extractorTar, types.CopyToContainerOptions{}); err != nil {
+		removeContainer(true)
+		return nil, fmt.Errorf("error copying extractor script to container: %w", err)
+	}
+
+	tmpTar, err := os.CreateTemp("", "")
+	if err != nil {
+		removeContainer(true)
+		return nil, fmt.Errorf("error creating temporary file: %w", err)
+	}
+	_ = tmpTar.Close()
+
+	err = storage.InflateBrotli(brotliPath, func(s string) error {
+		// tar the tar to make Docker happy
+		_, err := execute.Exec([]string{"tar", "-cf", tmpTar.Name(), filepath.Base(s)}, &execute.Opts{
+			Cwd: filepath.Dir(s),
+		})
+		if err != nil {
+			return err
+		}
+
+		f, err := os.Open(tmpTar.Name())
+		if err != nil {
+			return err
+		}
+		defer func() { _ = f.Close() }()
+		return c.d.CopyToContainer(context.Background(), cont.ID, "/tmp", f, types.CopyToContainerOptions{})
+	})
+
+	if err != nil {
+		removeContainer(true)
+		return nil, fmt.Errorf("failed copying data into container: %w", err)
+	}
+
+	if err = c.ContainerStart(cont.ID); err != nil {
+		removeContainer(true)
+		return nil, fmt.Errorf("failed starting container: %w", err)
+	}
+
+	if err = c.ContainerWait(cont.ID); err != nil {
+		removeContainer(true)
+		return nil, fmt.Errorf("failed waiting for container: %w", err)
+	}
+
+	res, status, err := c.GetContainerResult(cont.ID)
+	if err != nil {
+		removeContainer(true)
+		return nil, fmt.Errorf("failed reading container output: %w", err)
+	}
+
+	if status != 0 {
+		removeContainer(true)
+		return nil, fmt.Errorf("container exited with status %d: %s", status, res.String())
+	}
+
+	removeContainer(false)
+
+	return &PrepareVolumeResult{VolumeID: volumeName}, nil
 }
 
 func (c *clientImpl) PullImage(name string) error {
@@ -122,8 +246,8 @@ func (c *clientImpl) CreateContainer(info *RunInformation) (*CreateContainerResu
 
 	mounts := make([]mount.Mount, 0, len(info.Mounts)+1)
 	mounts = append(mounts, mount.Mount{
-		Type:     mount.TypeBind,
-		Source:   info.WorkDir,
+		Type:     mount.TypeVolume,
+		Source:   info.SourceVolume.VolumeID,
 		Target:   "/work/" + workDirTarget,
 		ReadOnly: true,
 	})
@@ -137,10 +261,16 @@ func (c *clientImpl) CreateContainer(info *RunInformation) (*CreateContainerResu
 		})
 	}
 
+	var cmd []string
+	if info.Command != "" {
+		cmd = []string{info.Command}
+	}
+
 	res, err := c.d.ContainerCreate(context.Background(), &container.Config{
 		Env:   envs,
 		Image: info.Image,
 		User:  "1000",
+		Cmd:   cmd,
 	}, &container.HostConfig{
 		AutoRemove: false,
 		Mounts:     mounts,
@@ -196,6 +326,7 @@ func (c *clientImpl) GetContainerResult(id string) (output *bytes.Buffer, exitSt
 	if err != nil {
 		return
 	}
+	defer func() { _ = out.Close() }()
 
 	exitStatus = inspect.State.ExitCode
 	if inspect.State.OOMKilled {
@@ -254,4 +385,8 @@ func (c *clientImpl) GetContainerOutput(result *CreateContainerResult) (output [
 
 func (c *clientImpl) ContainerStart(id string) error {
 	return c.d.ContainerStart(context.Background(), id, types.ContainerStartOptions{})
+}
+
+func (c *clientImpl) RemoveVolume(vol *PrepareVolumeResult) error {
+	return c.d.VolumeRemove(context.Background(), vol.VolumeID, true)
 }

@@ -85,6 +85,7 @@ type worker struct {
 	containerStatus *ConcurrentMap[string, *containerResult]
 	secretsSource   map[string]string
 	emittedErrors   map[string]bool
+	sourceVolume    *docker.PrepareVolumeResult
 }
 
 func (w *worker) SetCheckError(plugin string, message string) {
@@ -153,6 +154,14 @@ func (w *worker) cleanup() {
 	w.containers = map[string]*docker.CreateContainerResult{}
 	w.emittedErrors = map[string]bool{}
 	w.containerStatus.Reset()
+	if w.sourceVolume != nil {
+		if err := w.docker.RemoveVolume(w.sourceVolume); err != nil {
+			w.log.Error("Error removing volume",
+				zap.String("volume_name", w.sourceVolume.VolumeID),
+				zap.Error(err))
+		}
+		w.sourceVolume = nil
+	}
 }
 
 func (w *worker) perform() error {
@@ -208,8 +217,9 @@ func (w *worker) acquireCommit() error {
 	w.log.Info("Acquiring commit",
 		zap.String("repository", w.job.Repo),
 		zap.String("sha", w.job.Commitish))
+	brPath := filepath.Join(w.commitDir, w.job.Commitish+".tar.br")
 	err := withBackoff(w.log, "downloading commit", defaultAttemptCount, func() error {
-		err := w.storage.DownloadCommit(w.job.Repo, w.job.Commitish, w.commitDir)
+		err := w.storage.DownloadCommit(w.job.Repo, w.job.Commitish, brPath)
 		if err != nil {
 			w.log.Error("Error acquiring commit",
 				zap.String("repo", w.job.Repo),
@@ -222,6 +232,19 @@ func (w *worker) acquireCommit() error {
 		return fmt.Errorf("could not download %s@%s; all attempts failed. Last error: %w",
 			w.job.Repo, w.job.Commitish, err)
 	}
+
+	w.log.Info("Preparing source volume",
+		zap.String("repository", w.job.Repo),
+		zap.String("sha", w.job.Commitish))
+	vol, err := w.docker.PrepareVolume(brPath)
+	if err != nil {
+		w.log.Info("Failed preparing source volume",
+			zap.String("repository", w.job.Repo),
+			zap.String("sha", w.job.Commitish),
+			zap.Error(err))
+		return err
+	}
+	w.sourceVolume = vol
 	return nil
 }
 
@@ -381,12 +404,12 @@ func (w *worker) prepareRuntime() error {
 		}
 
 		res, err := w.docker.CreateContainer(&docker.RunInformation{
-			Image:     check.Plugin,
-			WorkDir:   w.commitDir,
-			RepoName:  w.job.Repo,
-			Commitish: w.job.Commitish,
-			Mounts:    mounts,
-			Envs:      check.Envs,
+			Image:        check.Plugin,
+			RepoName:     w.job.Repo,
+			Commitish:    w.job.Commitish,
+			Mounts:       mounts,
+			Envs:         check.Envs,
+			SourceVolume: w.sourceVolume,
 		})
 		if err != nil {
 			w.log.Error("Error creating container. Aborting operation.",

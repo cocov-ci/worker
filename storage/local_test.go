@@ -7,7 +7,6 @@ import (
 	"go.uber.org/zap"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -73,14 +72,8 @@ func TestLocalStorage_CommitPath(t *testing.T) {
 
 func TestDownloadCommit(t *testing.T) {
 	local := makeLocalStorage(t)
-	tmp, err := os.MkdirTemp("", "")
-	require.NoError(t, err)
+	target := test_helpers.TmpPath(t)
 
-	err = local.DownloadCommit("repo", "9cff62ad797c372277f6c6b71d10e643947b5340", tmp)
+	err := local.DownloadCommit("repo", "9cff62ad797c372277f6c6b71d10e643947b5340", target)
 	assert.NoError(t, err)
-
-	f, err := os.ReadFile(filepath.Join(tmp, "README"))
-	assert.NoError(t, err)
-	
-	assert.True(t, strings.HasPrefix(string(f), "# Cocov"))
 }

@@ -123,6 +123,21 @@ func (mr *DockerMockMockRecorder) GetContainerResult(id interface{}) *gomock.Cal
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetContainerResult", reflect.TypeOf((*DockerMock)(nil).GetContainerResult), id)
 }
 
+// PrepareVolume mocks base method.
+func (m *DockerMock) PrepareVolume(brotliPath string) (*docker.PrepareVolumeResult, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "PrepareVolume", brotliPath)
+	ret0, _ := ret[0].(*docker.PrepareVolumeResult)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// PrepareVolume indicates an expected call of PrepareVolume.
+func (mr *DockerMockMockRecorder) PrepareVolume(brotliPath interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PrepareVolume", reflect.TypeOf((*DockerMock)(nil).PrepareVolume), brotliPath)
+}
+
 // PullImage mocks base method.
 func (m *DockerMock) PullImage(name string) error {
 	m.ctrl.T.Helper()
@@ -135,4 +150,18 @@ func (m *DockerMock) PullImage(name string) error {
 func (mr *DockerMockMockRecorder) PullImage(name interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PullImage", reflect.TypeOf((*DockerMock)(nil).PullImage), name)
+}
+
+// RemoveVolume mocks base method.
+func (m *DockerMock) RemoveVolume(vol *docker.PrepareVolumeResult) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RemoveVolume", vol)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// RemoveVolume indicates an expected call of RemoveVolume.
+func (mr *DockerMockMockRecorder) RemoveVolume(vol interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RemoveVolume", reflect.TypeOf((*DockerMock)(nil).RemoveVolume), vol)
 }
