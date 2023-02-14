@@ -531,6 +531,13 @@ func (w *worker) serviceContainer(cID string, done func()) {
 		return
 	}
 
+	err = withBackoff(w.log, "setting succeeded status", defaultAttemptCount, func() error {
+		return w.api.SetCheckSucceeded(w.job, cInfo.Image)
+	})
+	if err != nil {
+		log.Error("Failed invoking SetCheckSucceeded", zap.Error(err))
+	}
+
 	log.Info("Operation completed. Removing container...")
 	w.containerStatus.Set(cID, &containerResult{
 		Image:           cInfo.Image,

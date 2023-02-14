@@ -25,7 +25,7 @@ func makeClient(t *testing.T) *clientImpl {
 
 func TestDockerPullImage(t *testing.T) {
 	c := makeClient(t)
-	err := c.PullImage("cocov/dummy:v0.1")
+	err := c.PullImage("cocov/faulty:v0.1")
 	require.NoError(t, err)
 }
 

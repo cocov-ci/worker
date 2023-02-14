@@ -351,6 +351,7 @@ func TestWorkServiceRemoveContainerOK(t *testing.T) {
 
 	// API setup
 	m.api.EXPECT().SetCheckRunning(w.job, "b").Return(nil)
+	m.api.EXPECT().SetCheckSucceeded(w.job, "b").Return(nil)
 
 	w.serviceContainer("a", func() {})
 	status := w.containerStatus.Get("a")
@@ -384,6 +385,7 @@ func TestWorkServiceRemoveContainerFailure(t *testing.T) {
 
 	// API setup
 	m.api.EXPECT().SetCheckRunning(w.job, "b").Return(nil)
+	m.api.EXPECT().SetCheckSucceeded(w.job, "b").Return(nil)
 
 	w.serviceContainer("a", func() {})
 	status := w.containerStatus.Get("a")
@@ -544,6 +546,7 @@ func TestWorker_RunFull(t *testing.T) {
 	// serviceContainer
 	m.docker.EXPECT().ContainerStart("a").Return(nil)
 	m.api.EXPECT().SetCheckRunning(w.job, "foo").Return(nil)
+	m.api.EXPECT().SetCheckSucceeded(w.job, "foo").Return(nil)
 	m.docker.EXPECT().ContainerWait("a").Return(nil)
 	m.docker.EXPECT().GetContainerResult("a").Return(&bytes.Buffer{}, 0, nil)
 	m.docker.EXPECT().GetContainerOutput(w.containers["a"]).Return([]byte{}, nil)
