@@ -531,8 +531,12 @@ func (w *worker) serviceContainer(cID string, done func()) {
 		return
 	}
 
-	err = withBackoff(w.log, "setting succeeded status", defaultAttemptCount, func() error {
-		return w.api.SetCheckSucceeded(w.job, cInfo.Image)
+	err = withBackoff(w.log, "setting final status", defaultAttemptCount, func() error {
+		if exitStatus == 0 {
+			return w.api.SetCheckSucceeded(w.job, cInfo.Image)
+		} else {
+			return w.api.SetCheckError(w.job, cInfo.Image, containerOutput.String())
+		}
 	})
 	if err != nil {
 		log.Error("Failed invoking SetCheckSucceeded", zap.Error(err))
