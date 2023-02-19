@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -40,14 +39,6 @@ func withBackoff(log *zap.Logger, operationName string, maxTries int, fn func() 
 	return err
 }
 
-type containerResult struct {
-	Error           error
-	ExitStatus      int
-	ContainerOutput string
-	OutputFileData  []byte
-	Image           string
-}
-
 const defaultAttemptCount = 10
 
 func newWorker(log *zap.Logger, id int, scheduler IndirectScheduler, dockerClient docker.Client, apiClient api.Client, storageClient storage.Base, redisClient redis.Client, done func()) *worker {
@@ -62,8 +53,7 @@ func newWorker(log *zap.Logger, id int, scheduler IndirectScheduler, dockerClien
 		storage:   storageClient,
 		redis:     redisClient,
 
-		containers:      map[string]*docker.CreateContainerResult{},
-		containerStatus: NewConcurrentMap[string, *containerResult](),
+		containers: map[string]*docker.CreateContainerResult{},
 	}
 }
 
@@ -83,11 +73,10 @@ type worker struct {
 	commitDir  string
 	secretsDir string
 
-	containers      map[string]*docker.CreateContainerResult
-	containerStatus *ConcurrentMap[string, *containerResult]
-	secretsSource   map[string]string
-	emittedErrors   map[string]bool
-	sourceVolume    *docker.PrepareVolumeResult
+	containers    map[string]*docker.CreateContainerResult
+	secretsSource map[string]string
+	emittedErrors map[string]bool
+	sourceVolume  *docker.PrepareVolumeResult
 }
 
 func (w *worker) SetCheckError(plugin string, message string) {
@@ -155,7 +144,7 @@ func (w *worker) cleanup() {
 	}
 	w.containers = map[string]*docker.CreateContainerResult{}
 	w.emittedErrors = map[string]bool{}
-	w.containerStatus.Reset()
+	//w.containerStatus.Reset()
 	if w.sourceVolume != nil {
 		if err := w.docker.RemoveVolume(w.sourceVolume); err != nil {
 			w.log.Error("Error removing volume",
@@ -203,10 +192,8 @@ func (w *worker) perform() error {
 
 	w.startContainers()
 
-	finalStatus, checks := w.aggregateResults()
-
-	err = withBackoff(w.log, "pushing results", defaultAttemptCount, func() error {
-		return w.api.PushIssues(w.job, checks, finalStatus)
+	err = withBackoff(w.log, "emit wrap up signal", defaultAttemptCount, func() error {
+		return w.api.WrapUp(w.job)
 	})
 
 	if err != nil {
@@ -445,56 +432,23 @@ func (w *worker) startContainers() {
 	w.log.Info("Containers finished", zap.Duration("total_duration", duration))
 }
 
-func (w *worker) aggregateResults() (string, map[string]any) {
-	checks := map[string]any{}
-	failed := false
-
-	for _, v := range w.containerStatus.Map() {
-		if v.Error != nil {
-			w.SetCheckError(v.Image, fmt.Sprintf("Execution failed due to internal error: %s", v.Error))
-			failed = true
-			continue
-		}
-
-		if v.ExitStatus != 0 {
-			w.SetCheckError(v.Image, fmt.Sprintf("Execution failed. Plugin exited with status %d:\n%s", v.ExitStatus, v.ContainerOutput))
-			failed = true
-			continue
-		}
-
-		if records, err := ParseReportItems(v.OutputFileData); err != nil {
-			w.SetCheckError(v.Image, fmt.Sprintf("Execution failed. Error parsing plugin output: %s", err.Error()))
-			failed = true
-			continue
-		} else {
-			checks[strings.SplitN(v.Image, ":", 2)[0]] = records
-		}
-
-		err := withBackoff(w.log, "emitting check succeeded status", defaultAttemptCount, func() error {
-			return w.api.SetCheckSucceeded(w.job, v.Image)
-		})
-		if err != nil {
-			w.log.Error("Failed invoking SetCheckSucceeded", zap.Error(err))
-		}
-	}
-
-	finalStatus := "processed"
-	if failed {
-		finalStatus = "errored"
-	}
-
-	return finalStatus, checks
-}
-
 func (w *worker) serviceContainer(cID string, done func()) {
 	defer done()
 	cInfo := w.containers[cID]
 	log := w.log.With(zap.String("check", cInfo.Image))
 
+	defer func() {
+		// At this point, all required information has been read. Delete the container.
+		if err := w.docker.AbortAndRemove(cInfo); err != nil {
+			log.Error("Failed invoking AbortAndRemove", zap.Error(err))
+		} else {
+			delete(w.containers, cID)
+		}
+	}()
+
 	if err := w.docker.ContainerStart(cID); err != nil {
 		log.Error("Failed starting container", zap.Error(err))
 		w.SetCheckError(cInfo.Image, fmt.Sprintf("Failed initializing container for %s: %s", cInfo.Image, err.Error()))
-		w.containerStatus.Set(cID, &containerResult{Error: fmt.Errorf("failed executing ContainerStart: %w", err)})
 		return
 	}
 
@@ -509,7 +463,6 @@ func (w *worker) serviceContainer(cID string, done func()) {
 	if err := w.docker.ContainerWait(cID); err != nil {
 		log.Error("Error waiting container", zap.Error(err))
 		w.SetCheckError(cInfo.Image, fmt.Sprintf("Failed waiting container result for %s: %s", cInfo.Image, err.Error()))
-		w.containerStatus.Set(cID, &containerResult{Error: fmt.Errorf("failed executing ContainerWait: %w", err)})
 		return
 	}
 
@@ -518,7 +471,6 @@ func (w *worker) serviceContainer(cID string, done func()) {
 	if err != nil {
 		log.Error("GetContainerResult failed", zap.Error(err))
 		w.SetCheckError(cInfo.Image, fmt.Sprintf("Failed obtaining result data for %s: %s", cInfo.Image, err.Error()))
-		w.containerStatus.Set(cID, &containerResult{Error: fmt.Errorf("failed executing GetContainerResult: %w", err)})
 		return
 	}
 
@@ -527,34 +479,38 @@ func (w *worker) serviceContainer(cID string, done func()) {
 	if err != nil {
 		log.Error("Error reading output file from container", zap.Error(err))
 		w.SetCheckError(cInfo.Image, fmt.Sprintf("Failed reading output data for %s: %s", cInfo.Image, err.Error()))
-		w.containerStatus.Set(cID, &containerResult{Error: fmt.Errorf("failed reading output file: %w", err)})
 		return
 	}
 
-	err = withBackoff(w.log, "setting final status", defaultAttemptCount, func() error {
-		if exitStatus == 0 {
-			return w.api.SetCheckSucceeded(w.job, cInfo.Image)
-		} else {
-			return w.api.SetCheckError(w.job, cInfo.Image, containerOutput.String())
+	if exitStatus == 0 {
+		var reportData []ReportItem
+		reportData, err = ParseReportItems(output)
+		if err != nil {
+			log.Error("Failed parsing container output", zap.Error(err))
+			w.SetCheckError(cInfo.Image, fmt.Sprintf("Failed parsing output for %s: %s", cInfo.Image, err.Error()))
+			return
 		}
-	})
+
+		if len(reportData) > 0 {
+			err = withBackoff(log, "emit check issues", defaultAttemptCount, func() error {
+				return w.api.PushIssues(w.job, cInfo.Image, reportData)
+			})
+		}
+
+		if err == nil {
+			err = withBackoff(log, "emit success check status", defaultAttemptCount, func() error {
+				return w.api.SetCheckSucceeded(w.job, cInfo.Image)
+			})
+		}
+	} else {
+		err = withBackoff(log, "emit failed check status", defaultAttemptCount, func() error {
+			return w.api.SetCheckError(w.job, cInfo.Image, containerOutput.String())
+		})
+	}
+
 	if err != nil {
-		log.Error("Failed invoking SetCheckSucceeded", zap.Error(err))
+		log.Error("Failed emitting final check status", zap.Error(err))
 	}
 
 	log.Info("Operation completed. Removing container...")
-	w.containerStatus.Set(cID, &containerResult{
-		Image:           cInfo.Image,
-		Error:           nil,
-		ExitStatus:      exitStatus,
-		ContainerOutput: containerOutput.String(),
-		OutputFileData:  output,
-	})
-
-	// At this point, all required information has been read. Delete the container.
-	if err := w.docker.AbortAndRemove(cInfo); err != nil {
-		log.Error("Failed invoking AbortAndRemove", zap.Error(err))
-	} else {
-		delete(w.containers, cID)
-	}
 }

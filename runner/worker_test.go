@@ -2,7 +2,9 @@ package runner
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
+	"github.com/stretchr/testify/require"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -246,6 +248,7 @@ func TestWorker_StartContainers(t *testing.T) {
 
 	// Docker setup
 	m.docker.EXPECT().ContainerStart("a").Return(fmt.Errorf("boom"))
+	m.docker.EXPECT().AbortAndRemove(w.containers["a"]).Return(nil)
 
 	// API setup
 	m.api.EXPECT().SetCheckError(w.job, "b", "Failed initializing container for b: boom")
@@ -269,6 +272,7 @@ func TestWorkerServiceContainerSetRunningFailure(t *testing.T) {
 	m.docker.EXPECT().ContainerStart("a").Return(nil)
 	// This should break it.
 	m.docker.EXPECT().ContainerWait("a").Return(fmt.Errorf("boom"))
+	m.docker.EXPECT().AbortAndRemove(w.containers["a"]).Return(nil)
 
 	// API setup
 	// SetCheckRunning may be called several times due to the backoff mechanism
@@ -276,7 +280,6 @@ func TestWorkerServiceContainerSetRunningFailure(t *testing.T) {
 	m.api.EXPECT().SetCheckError(w.job, "b", "Failed waiting container result for b: boom").Return(nil)
 
 	w.serviceContainer("a", func() {})
-	assert.NotNil(t, w.containerStatus.Get("a").Error)
 }
 
 // Tests a docker#GetContainerResult failing
@@ -294,13 +297,13 @@ func TestWorkServiceGetContainerResultFailure(t *testing.T) {
 	m.docker.EXPECT().ContainerWait("a").Return(nil)
 	// This should break it.
 	m.docker.EXPECT().GetContainerResult("a").Return(nil, -1, fmt.Errorf("boom"))
+	m.docker.EXPECT().AbortAndRemove(w.containers["a"]).Return(nil)
 
 	// API setup
 	m.api.EXPECT().SetCheckRunning(w.job, "b").Return(nil)
 	m.api.EXPECT().SetCheckError(w.job, "b", "Failed obtaining result data for b: boom").Return(nil)
 
 	w.serviceContainer("a", func() {})
-	assert.NotNil(t, w.containerStatus.Get("a").Error)
 }
 
 // Tests when trying to read the output file for a container fails
@@ -318,6 +321,7 @@ func TestWorkServiceReadOutputFails(t *testing.T) {
 	m.docker.EXPECT().ContainerWait("a").Return(nil)
 	m.docker.EXPECT().GetContainerResult("a").Return(&bytes.Buffer{}, 0, nil)
 	m.docker.EXPECT().GetContainerOutput(w.containers["a"]).Return(nil, fmt.Errorf("boom"))
+	m.docker.EXPECT().AbortAndRemove(w.containers["a"]).Return(nil)
 
 	// API setup
 	m.api.EXPECT().SetCheckRunning(w.job, "b").Return(nil)
@@ -327,7 +331,6 @@ func TestWorkServiceReadOutputFails(t *testing.T) {
 	})
 
 	w.serviceContainer("a", func() {})
-	assert.NotNil(t, w.containerStatus.Get("a").Error)
 }
 
 // Tests the last part of ServiceContainer in which we store its status,
@@ -354,13 +357,7 @@ func TestWorkServiceRemoveContainerOK(t *testing.T) {
 	m.api.EXPECT().SetCheckSucceeded(w.job, "b").Return(nil)
 
 	w.serviceContainer("a", func() {})
-	status := w.containerStatus.Get("a")
-	assert.Nil(t, status.Error)
-	assert.Equal(t, "b", status.Image)
-	assert.Equal(t, 0, status.ExitStatus)
-	assert.Equal(t, "", status.ContainerOutput)
-	assert.Empty(t, status.OutputFileData)
-	assert.Empty(t, w.containers)
+	assert.NotContains(t, w.containers, "a")
 }
 
 // Tests the last part of ServiceContainer in which we store its status,
@@ -388,123 +385,57 @@ func TestWorkServiceRemoveContainerFailure(t *testing.T) {
 	m.api.EXPECT().SetCheckSucceeded(w.job, "b").Return(nil)
 
 	w.serviceContainer("a", func() {})
-	status := w.containerStatus.Get("a")
-	assert.Nil(t, status.Error)
-	assert.Equal(t, "b", status.Image)
-	assert.Equal(t, 0, status.ExitStatus)
-	assert.Equal(t, "", status.ContainerOutput)
-	assert.Empty(t, status.OutputFileData)
-	assert.NotEmpty(t, w.containers)
+	assert.Contains(t, w.containers, "a")
 }
 
-// Asserts that AggregateResults returns the correct finalStatus, and sets a
-// given check as failed when a container status contains an Error field set.
-func TestAggregateResults_ContainerError(t *testing.T) {
+// Asserts that ServiceContainer emits the correct check status as failed when a
+// container exits with a non-zero exit status.
+func TestWorkServiceContainerNonZero(t *testing.T) {
 	m, w := makeMocks(t)
 	w.job = makeJob()
-	w.containerStatus.Set("a", &containerResult{
-		Error:           fmt.Errorf("boom"),
-		ExitStatus:      0,
-		ContainerOutput: "",
-		OutputFileData:  nil,
-		Image:           "img",
-	})
+	w.containers["a"] = &docker.CreateContainerResult{
+		ContainerID: "a",
+		Image:       "b",
+		OutputFile:  makeOutputFile(t),
+	}
 
-	m.api.EXPECT().SetCheckError(w.job, "img", "Execution failed due to internal error: boom").Return(nil)
-	final, checks := w.aggregateResults()
-	assert.Empty(t, checks)
-	assert.Equal(t, "errored", final)
+	// Docker setup
+	m.docker.EXPECT().ContainerStart("a").Return(nil)
+	m.docker.EXPECT().ContainerWait("a").Return(nil)
+	m.docker.EXPECT().GetContainerResult("a").Return(bytes.NewBuffer([]byte("Boom!")), 1, nil)
+	m.docker.EXPECT().GetContainerOutput(w.containers["a"]).Return([]byte{}, nil)
+	m.docker.EXPECT().AbortAndRemove(w.containers["a"]).Return(nil)
+
+	// API setup
+	m.api.EXPECT().SetCheckRunning(w.job, "b").Return(nil)
+	m.api.EXPECT().SetCheckError(w.job, "b", "Boom!").Return(nil)
+
+	w.serviceContainer("a", func() {})
 }
 
-// Asserts that AggregateResults returns the correct finalStatus and sets a
-// given check as failed when a container exits with a non-zero exit status.
-func TestAggregateResults_ContainerNonZero(t *testing.T) {
+// Asserts that AggregateResults emits the correct check status as failed when a
+// container emits corrupt report items
+func TestWorkServiceCorruptReportItems(t *testing.T) {
 	m, w := makeMocks(t)
 	w.job = makeJob()
-	w.containerStatus.Set("a", &containerResult{
-		Error:           nil,
-		ExitStatus:      1,
-		ContainerOutput: "boom!",
-		OutputFileData:  nil,
-		Image:           "img",
-	})
+	w.containers["a"] = &docker.CreateContainerResult{
+		ContainerID: "a",
+		Image:       "b",
+		OutputFile:  makeOutputFile(t),
+	}
 
-	m.api.EXPECT().SetCheckError(w.job, "img", "Execution failed. Plugin exited with status 1:\nboom!").Return(nil)
-	final, checks := w.aggregateResults()
-	assert.Empty(t, checks)
-	assert.Equal(t, "errored", final)
-}
+	// Docker setup
+	m.docker.EXPECT().ContainerStart("a").Return(nil)
+	m.docker.EXPECT().ContainerWait("a").Return(nil)
+	m.docker.EXPECT().GetContainerResult("a").Return(&bytes.Buffer{}, 0, nil)
+	m.docker.EXPECT().GetContainerOutput(w.containers["a"]).Return([]byte("corrupted"), nil)
+	m.docker.EXPECT().AbortAndRemove(w.containers["a"]).Return(nil)
 
-// Asserts that AggregateResults returns the correct finalStatus and sets a
-// given check as failed when a container emits corrupt report items
-func TestAggregateResults_CorruptReportItems(t *testing.T) {
-	m, w := makeMocks(t)
-	w.job = makeJob()
-	w.containerStatus.Set("a", &containerResult{
-		Error:           nil,
-		ExitStatus:      0,
-		ContainerOutput: "",
-		OutputFileData:  []byte("heeeeeeyooooo"),
-		Image:           "img",
-	})
+	// API setup
+	m.api.EXPECT().SetCheckRunning(w.job, "b").Return(nil)
+	m.api.EXPECT().SetCheckError(w.job, "b", "Failed parsing output for b: invalid character 'c' looking for beginning of value").Return(nil)
 
-	m.api.EXPECT().SetCheckError(w.job, "img", gomock.Any()).DoAndReturn(func(_ *redis.Job, _, output string) error {
-		assert.Contains(t, output, "Error parsing plugin output:")
-		return nil
-	})
-	final, checks := w.aggregateResults()
-	assert.Empty(t, checks)
-	assert.Equal(t, "errored", final)
-}
-
-// Asserts that when one plugin succeeds and other fails, the overall result is
-// a failure.
-func TestAggregateResults_OneOKOneErrored(t *testing.T) {
-	m, w := makeMocks(t)
-	w.job = makeJob()
-	w.containerStatus.Set("a", &containerResult{
-		Error:           nil,
-		ExitStatus:      0,
-		ContainerOutput: "",
-		OutputFileData:  []byte(""),
-		Image:           "img",
-	})
-	w.containerStatus.Set("b", &containerResult{
-		Error:           nil,
-		ExitStatus:      0,
-		ContainerOutput: "",
-		OutputFileData:  []byte("heyoooooooo"),
-		Image:           "img2",
-	})
-
-	m.api.EXPECT().SetCheckSucceeded(w.job, "img").Return(nil)
-	m.api.EXPECT().SetCheckError(w.job, "img2", gomock.Any()).DoAndReturn(func(_ *redis.Job, _, output string) error {
-		assert.Contains(t, output, "Error parsing plugin output:")
-		return nil
-	})
-
-	final, checks := w.aggregateResults()
-	assert.NotEmpty(t, checks)
-	assert.Equal(t, "errored", final)
-}
-
-// Asserts that SetCheckSucceeded does not cause the whole operation to fail
-func TestAggregateResults_SetCheckSucceededFailure(t *testing.T) {
-	m, w := makeMocks(t)
-	w.job = makeJob()
-	w.containerStatus.Set("a", &containerResult{
-		Error:           nil,
-		ExitStatus:      0,
-		ContainerOutput: "",
-		OutputFileData:  []byte(""),
-		Image:           "img",
-	})
-
-	// CheckSetSucceeded may be called several times due to the backoff mechanism
-	m.api.EXPECT().SetCheckSucceeded(w.job, "img").AnyTimes().Return(fmt.Errorf("boom"))
-	final, checks := w.aggregateResults()
-	assert.NotEmpty(t, checks)
-	assert.Equal(t, "processed", final)
+	w.serviceContainer("a", func() {})
 }
 
 func TestWorker_RunFull(t *testing.T) {
@@ -543,20 +474,28 @@ func TestWorker_RunFull(t *testing.T) {
 	m.docker.EXPECT().CreateContainer(gomock.Any()).Return(createResult, nil)
 	w.containers = map[string]*docker.CreateContainerResult{"a": createResult}
 
+	issues, err := json.Marshal(ReportItem{
+		Kind:      "bug",
+		File:      "foo.rb",
+		LineStart: 1,
+		LineEnd:   1,
+		Message:   "boom",
+		UID:       "foobar",
+	})
+	require.NoError(t, err)
+
 	// serviceContainer
 	m.docker.EXPECT().ContainerStart("a").Return(nil)
 	m.api.EXPECT().SetCheckRunning(w.job, "foo").Return(nil)
 	m.api.EXPECT().SetCheckSucceeded(w.job, "foo").Return(nil)
+	m.api.EXPECT().PushIssues(w.job, "foo", gomock.Any()).Return(nil)
 	m.docker.EXPECT().ContainerWait("a").Return(nil)
 	m.docker.EXPECT().GetContainerResult("a").Return(&bytes.Buffer{}, 0, nil)
-	m.docker.EXPECT().GetContainerOutput(w.containers["a"]).Return([]byte{}, nil)
+	m.docker.EXPECT().GetContainerOutput(w.containers["a"]).Return(issues, nil)
 	m.docker.EXPECT().AbortAndRemove(createResult).AnyTimes().Return(nil)
 
-	// aggregateResults
-	m.api.EXPECT().SetCheckSucceeded(w.job, "foo").Return(nil)
-
-	// back to perform...
-	m.api.EXPECT().PushIssues(w.job, gomock.Any(), "processed")
+	// Back to perform
+	m.api.EXPECT().WrapUp(w.job).Return(nil)
 
 	// Test
 	test_helpers.Timeout(t, 5*time.Second, w.Run)

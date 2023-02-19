@@ -57,7 +57,9 @@ type Client interface {
 	SetCheckError(job *redis.Job, plugin, reason string) error
 	SetCheckRunning(job *redis.Job, plugin string) error
 	SetCheckSucceeded(job *redis.Job, plugin string) error
-	PushIssues(job *redis.Job, issues map[string]any, status string) error
+	SetCheckCanceled(job *redis.Job, plugin string) error
+	PushIssues(job *redis.Job, plugin string, issues any) error
+	WrapUp(job *redis.Job) error
 	GetSecret(secret *redis.Mount) ([]byte, error)
 }
 
@@ -138,14 +140,31 @@ func (a api) SetCheckSucceeded(job *redis.Job, plugin string) error {
 	return err
 }
 
-func (a api) PushIssues(job *redis.Job, issues map[string]any, status string) error {
+func (a api) SetCheckCanceled(job *redis.Job, plugin string) error {
+	_, err := a.do("PATCH", fmt.Sprintf("/v1/repositories/%d/commits/%s/checks", job.RepoID, job.Commitish), &grequests.RequestOptions{
+		JSON: map[string]any{
+			"plugin_name": strings.SplitN(plugin, ":", 2)[0],
+			"status":      "canceled",
+		},
+	})
+
+	return err
+}
+
+func (a api) PushIssues(job *redis.Job, plugin string, issues any) error {
 	_, err := a.do("PUT", fmt.Sprintf("/v1/repositories/%d/issues", job.RepoID), &grequests.RequestOptions{
 		JSON: map[string]any{
-			"status": status,
+			"source": plugin,
 			"sha":    job.Commitish,
 			"issues": issues,
 		},
 	})
+
+	return err
+}
+
+func (a api) WrapUp(job *redis.Job) error {
+	_, err := a.do("POST", fmt.Sprintf("/v1/repositories/%d/commits/%s/checks/wrap_up", job.RepoID, job.Commitish), &grequests.RequestOptions{})
 
 	return err
 }

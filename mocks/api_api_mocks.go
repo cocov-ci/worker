@@ -64,17 +64,31 @@ func (mr *APIMockMockRecorder) Ping() *gomock.Call {
 }
 
 // PushIssues mocks base method.
-func (m *APIMock) PushIssues(job *redis.Job, issues map[string]any, status string) error {
+func (m *APIMock) PushIssues(job *redis.Job, plugin string, issues any) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "PushIssues", job, issues, status)
+	ret := m.ctrl.Call(m, "PushIssues", job, plugin, issues)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // PushIssues indicates an expected call of PushIssues.
-func (mr *APIMockMockRecorder) PushIssues(job, issues, status interface{}) *gomock.Call {
+func (mr *APIMockMockRecorder) PushIssues(job, plugin, issues interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PushIssues", reflect.TypeOf((*APIMock)(nil).PushIssues), job, issues, status)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PushIssues", reflect.TypeOf((*APIMock)(nil).PushIssues), job, plugin, issues)
+}
+
+// SetCheckCanceled mocks base method.
+func (m *APIMock) SetCheckCanceled(job *redis.Job, plugin string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SetCheckCanceled", job, plugin)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// SetCheckCanceled indicates an expected call of SetCheckCanceled.
+func (mr *APIMockMockRecorder) SetCheckCanceled(job, plugin interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetCheckCanceled", reflect.TypeOf((*APIMock)(nil).SetCheckCanceled), job, plugin)
 }
 
 // SetCheckError mocks base method.
@@ -117,4 +131,18 @@ func (m *APIMock) SetCheckSucceeded(job *redis.Job, plugin string) error {
 func (mr *APIMockMockRecorder) SetCheckSucceeded(job, plugin interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetCheckSucceeded", reflect.TypeOf((*APIMock)(nil).SetCheckSucceeded), job, plugin)
+}
+
+// WrapUp mocks base method.
+func (m *APIMock) WrapUp(job *redis.Job) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "WrapUp", job)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// WrapUp indicates an expected call of WrapUp.
+func (mr *APIMockMockRecorder) WrapUp(job interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "WrapUp", reflect.TypeOf((*APIMock)(nil).WrapUp), job)
 }

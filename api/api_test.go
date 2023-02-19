@@ -154,19 +154,48 @@ func TestSetCheckSucceeded(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestSetCheckcanceled(t *testing.T) {
+	ok := make(chan bool)
+	cli := makeTestServer(t, "/v1/repositories/10/commits/sha/checks", func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, r.Method, "PATCH")
+		data := getJSON[map[string]string](t, r)
+		assert.Equal(t, "plugin", data["plugin_name"])
+		assert.Equal(t, "canceled", data["status"])
+		assert.Equal(t, "bearer token", r.Header.Get("Authorization"))
+		close(ok)
+	})
+
+	err := cli.SetCheckCanceled(makeJob(), "plugin")
+	<-ok
+	require.NoError(t, err)
+}
+
 func TestPushIssues(t *testing.T) {
 	ok := make(chan bool)
 	cli := makeTestServer(t, "/v1/repositories/10/issues", func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, r.Method, "PUT")
 		data := getJSON[map[string]any](t, r)
-		assert.Equal(t, "status", data["status"].(string))
 		assert.Equal(t, "sha", data["sha"].(string))
-		assert.Equal(t, "true", data["issues"].(map[string]any)["test"].(string))
+		assert.Equal(t, "test", data["source"].(string))
+		assert.Equal(t, "true", data["issues"].([]any)[0].(string))
 		assert.Equal(t, "bearer token", r.Header.Get("Authorization"))
 		close(ok)
 	})
 
-	err := cli.PushIssues(makeJob(), map[string]any{"test": "true"}, "status")
+	err := cli.PushIssues(makeJob(), "test", []any{"true"})
+	<-ok
+	require.NoError(t, err)
+}
+
+func TestWrapUp(t *testing.T) {
+	ok := make(chan bool)
+	cli := makeTestServer(t, "/v1/repositories/10/commits/sha/checks/wrap_up", func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, r.Method, "POST")
+		assert.Equal(t, "bearer token", r.Header.Get("Authorization"))
+		close(ok)
+	})
+
+	err := cli.WrapUp(makeJob())
 	<-ok
 	require.NoError(t, err)
 }
