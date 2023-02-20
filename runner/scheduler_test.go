@@ -11,13 +11,15 @@ import (
 	"github.com/cocov-ci/worker/test_helpers"
 )
 
-func makeScheduler() *Scheduler {
+func makeScheduler(t *testing.T) (*allMocks, *Scheduler) {
 	zap.ReplaceGlobals(zap.NewNop())
-	return New(1, nil, nil, nil, nil)
+	mocks, _ := makeMocks(t)
+
+	return mocks, New(1, nil, nil, mocks.redis, nil)
 }
 
 func TestScheduler_RegisterJob(t *testing.T) {
-	sch := makeScheduler()
+	_, sch := makeScheduler(t)
 	job := &redis.Job{
 		JobID:      "a",
 		Org:        "b",
@@ -33,7 +35,7 @@ func TestScheduler_RegisterJob(t *testing.T) {
 }
 
 func TestScheduler_DeregisterJob(t *testing.T) {
-	sch := makeScheduler()
+	_, sch := makeScheduler(t)
 	job := &redis.Job{
 		JobID:      "a",
 		Org:        "b",
@@ -63,6 +65,8 @@ type dummyRunner struct {
 	onStart func()
 }
 
+func (d dummyRunner) CancelJob(jobID string) {}
+
 func (d dummyRunner) Run() {
 	if d.onStart != nil {
 		d.onStart()
@@ -74,7 +78,9 @@ func (d dummyRunner) Run() {
 func (d dummyRunner) prime() { close(d.ok) }
 
 func TestScheduler_Run(t *testing.T) {
-	sch := makeScheduler()
+	mocks, sch := makeScheduler(t)
+	mocks.redis.EXPECT().NextControlRequest().AnyTimes().Return(nil)
+
 	var prime func()
 	wait := make(chan bool)
 	done := make(chan bool)

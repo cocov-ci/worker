@@ -55,6 +55,7 @@ type Client interface {
 	ContainerStart(id string) error
 	RemoveVolume(vol *PrepareVolumeResult) error
 	PrepareVolume(brotliPath string) (*PrepareVolumeResult, error)
+	TerminateContainer(v *CreateContainerResult)
 }
 
 func New(host string) (Client, error) {
@@ -88,6 +89,15 @@ type clientImpl struct {
 }
 
 func (c *clientImpl) PrepareVolume(brotliPath string) (*PrepareVolumeResult, error) {
+	tmpTar, err := os.CreateTemp("", "")
+	if err != nil {
+		return nil, fmt.Errorf("error creating temporary file: %w", err)
+	}
+	_ = tmpTar.Close()
+	defer func() {
+		_ = os.Remove(tmpTar.Name())
+	}()
+
 	volumeName := uuid.Generate().String()
 	vol, err := c.d.VolumeCreate(context.Background(), volume.VolumeCreateBody{
 		Driver: "local",
@@ -108,6 +118,9 @@ func (c *clientImpl) PrepareVolume(brotliPath string) (*PrepareVolumeResult, err
 	cont, err := c.d.ContainerCreate(context.Background(), &container.Config{
 		Image: "alpine",
 		Cmd:   []string{"/root/script"},
+		Env: []string{
+			"EXTRACTOR_FILE_BASENAME=" + filepath.Base(tmpTar.Name()),
+		},
 	}, &container.HostConfig{
 		Mounts: []mount.Mount{
 			{
@@ -144,13 +157,6 @@ func (c *clientImpl) PrepareVolume(brotliPath string) (*PrepareVolumeResult, err
 		removeContainer(true)
 		return nil, fmt.Errorf("error copying extractor script to container: %w", err)
 	}
-
-	tmpTar, err := os.CreateTemp("", "")
-	if err != nil {
-		removeContainer(true)
-		return nil, fmt.Errorf("error creating temporary file: %w", err)
-	}
-	_ = tmpTar.Close()
 
 	err = storage.InflateBrotli(brotliPath, func(s string) error {
 		// tar the tar to make Docker happy
@@ -391,4 +397,8 @@ func (c *clientImpl) ContainerStart(id string) error {
 
 func (c *clientImpl) RemoveVolume(vol *PrepareVolumeResult) error {
 	return c.d.VolumeRemove(context.Background(), vol.VolumeID, true)
+}
+
+func (c *clientImpl) TerminateContainer(v *CreateContainerResult) {
+	_ = c.d.ContainerKill(context.Background(), v.ContainerID, "SIGKILL")
 }

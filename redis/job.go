@@ -19,6 +19,7 @@ type Mount struct {
 
 type Job struct {
 	JobID      string     `json:"job_id,omitempty"`
+	CheckSetId int        `json:"check_set_id,omitempty"`
 	Org        string     `json:"org,omitempty"`
 	Repo       string     `json:"repo,omitempty"`
 	RepoID     uint64     `json:"repo_id,omitempty"`

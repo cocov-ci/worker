@@ -133,6 +133,20 @@ func (mr *APIMockMockRecorder) SetCheckSucceeded(job, plugin interface{}) *gomoc
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetCheckSucceeded", reflect.TypeOf((*APIMock)(nil).SetCheckSucceeded), job, plugin)
 }
 
+// SetSetRunning mocks base method.
+func (m *APIMock) SetSetRunning(job *redis.Job) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SetSetRunning", job)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// SetSetRunning indicates an expected call of SetSetRunning.
+func (mr *APIMockMockRecorder) SetSetRunning(job interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetSetRunning", reflect.TypeOf((*APIMock)(nil).SetSetRunning), job)
+}
+
 // WrapUp mocks base method.
 func (m *APIMock) WrapUp(job *redis.Job) error {
 	m.ctrl.T.Helper()

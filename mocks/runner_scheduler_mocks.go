@@ -81,6 +81,18 @@ func (m *Mockrunnable) EXPECT() *MockrunnableMockRecorder {
 	return m.recorder
 }
 
+// CancelJob mocks base method.
+func (m *Mockrunnable) CancelJob(jobID string) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "CancelJob", jobID)
+}
+
+// CancelJob indicates an expected call of CancelJob.
+func (mr *MockrunnableMockRecorder) CancelJob(jobID interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CancelJob", reflect.TypeOf((*Mockrunnable)(nil).CancelJob), jobID)
+}
+
 // Run mocks base method.
 func (m *Mockrunnable) Run() {
 	m.ctrl.T.Helper()

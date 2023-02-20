@@ -48,6 +48,20 @@ func (mr *RedisMockMockRecorder) Next() *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Next", reflect.TypeOf((*RedisMock)(nil).Next))
 }
 
+// NextControlRequest mocks base method.
+func (m *RedisMock) NextControlRequest() any {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "NextControlRequest")
+	ret0, _ := ret[0].(any)
+	return ret0
+}
+
+// NextControlRequest indicates an expected call of NextControlRequest.
+func (mr *RedisMockMockRecorder) NextControlRequest() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NextControlRequest", reflect.TypeOf((*RedisMock)(nil).NextControlRequest))
+}
+
 // Ping mocks base method.
 func (m *RedisMock) Ping() error {
 	m.ctrl.T.Helper()

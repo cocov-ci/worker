@@ -47,11 +47,13 @@ func newWorker(log *zap.Logger, id int, scheduler IndirectScheduler, dockerClien
 		log:  log.With(zap.Int("worker_id", id)),
 		done: done,
 
-		scheduler: scheduler,
-		docker:    dockerClient,
-		api:       apiClient,
-		storage:   storageClient,
-		redis:     redisClient,
+		scheduler:  scheduler,
+		docker:     dockerClient,
+		api:        apiClient,
+		storage:    storageClient,
+		redis:      redisClient,
+		jobStateMu: &sync.Mutex{},
+		cancelMu:   &sync.Mutex{},
 
 		containers: map[string]*docker.CreateContainerResult{},
 	}
@@ -68,6 +70,7 @@ type worker struct {
 	storage   storage.Base
 	redis     redis.Client
 
+	jobStateMu *sync.Mutex
 	job        *redis.Job
 	workDir    string
 	commitDir  string
@@ -77,6 +80,9 @@ type worker struct {
 	secretsSource map[string]string
 	emittedErrors map[string]bool
 	sourceVolume  *docker.PrepareVolumeResult
+
+	cancelMu *sync.Mutex
+	canceled bool
 }
 
 func (w *worker) SetCheckError(plugin string, message string) {
@@ -95,6 +101,25 @@ func (w *worker) SetCheckError(plugin string, message string) {
 	w.emittedErrors[plugin] = true
 }
 
+func (w *worker) CancelJob(jobID string) {
+	w.jobStateMu.Lock()
+	defer w.jobStateMu.Unlock()
+
+	if w.job == nil || w.job.JobID != jobID {
+		return
+	}
+
+	w.log.Info("Receive cancellation request for job", zap.String("id", jobID))
+
+	w.cancelMu.Lock()
+	w.canceled = true
+	for id, v := range w.containers {
+		w.log.Info("Requesting termination of associated container", zap.String("id", id))
+		w.docker.TerminateContainer(v)
+	}
+	w.cancelMu.Unlock()
+}
+
 func (w *worker) Run() {
 	defer w.done()
 
@@ -106,16 +131,38 @@ func (w *worker) Run() {
 			w.log.Info("Stopping...")
 			break
 		}
-		w.cleanup()
-		w.log.Info("Picked up", zap.String("job_id", job.JobID))
-		w.scheduler.RegisterJob(job, w.id)
-		w.job = job
+
+		w.pickup(job)
 		if err := w.perform(); err != nil {
 			w.log.Error("Failed performing job", zap.Error(err))
 			w.emitGeneralError()
 		}
-		w.scheduler.DeregisterJob(job, w.id)
+		w.releaseJob()
 	}
+}
+
+func (w *worker) pickup(job *redis.Job) {
+	w.jobStateMu.Lock()
+	defer w.jobStateMu.Unlock()
+
+	w.cleanup()
+	err := withBackoff(w.log, "notifying api of set status", defaultAttemptCount, func() error {
+		return w.api.SetSetRunning(job)
+	})
+	if err != nil {
+		w.log.Error("Failed invoking SetCheckCanceled", zap.Error(err))
+	}
+	w.log.Info("Picked up", zap.String("job_id", job.JobID))
+	w.scheduler.RegisterJob(job, w.id)
+	w.job = job
+}
+
+func (w *worker) releaseJob() {
+	w.jobStateMu.Lock()
+	defer w.jobStateMu.Unlock()
+
+	w.scheduler.DeregisterJob(w.job, w.id)
+	w.cleanup()
 }
 
 func (w *worker) emitGeneralError() {
@@ -135,6 +182,7 @@ func (w *worker) cleanup() {
 	}
 	w.workDir = ""
 	w.job = nil
+	w.canceled = false
 	for _, k := range w.containers {
 		if err := w.docker.AbortAndRemove(k); err != nil {
 			w.log.Error("Error removing container",
@@ -144,7 +192,6 @@ func (w *worker) cleanup() {
 	}
 	w.containers = map[string]*docker.CreateContainerResult{}
 	w.emittedErrors = map[string]bool{}
-	//w.containerStatus.Reset()
 	if w.sourceVolume != nil {
 		if err := w.docker.RemoveVolume(w.sourceVolume); err != nil {
 			w.log.Error("Error removing volume",
@@ -155,7 +202,37 @@ func (w *worker) cleanup() {
 	}
 }
 
+var cancelledErr = fmt.Errorf("received cancelation request for this job")
+
+func (w *worker) earlyCancelCheck() {
+	w.cancelMu.Lock()
+	defer w.cancelMu.Unlock()
+	if w.canceled {
+		w.log.Info("Caught early cancellation signal")
+		panic(cancelledErr)
+	}
+}
+
+func (w *worker) operationCancelCheck() {
+	w.cancelMu.Lock()
+	defer w.cancelMu.Unlock()
+	if w.canceled {
+		w.log.Info("Caught operation cancellation signal")
+		panic(cancelledErr)
+	}
+}
+
 func (w *worker) perform() error {
+	defer func() {
+		if err := recover(); err != nil {
+			if err == cancelledErr {
+				return
+			} else {
+				panic(err)
+			}
+		}
+	}()
+
 	tempPath, err := os.MkdirTemp("", "")
 	if err != nil {
 		w.log.Error("Failed generating temporary directory", zap.Error(err))
@@ -174,32 +251,44 @@ func (w *worker) perform() error {
 		return err
 	}
 
-	if err = w.downloadImages(); err != nil {
-		return err
+	operations := []func() error{
+		w.downloadImages,
+		w.obtainSecrets,
+		w.acquireCommit,
+		w.prepareRuntime,
 	}
 
-	if err = w.obtainSecrets(); err != nil {
-		return err
-	}
+	for _, op := range operations {
+		w.earlyCancelCheck()
+		if err = op(); err != nil {
+			w.log.Error("Failed initializing runtime", zap.Error(err))
 
-	if err = w.acquireCommit(); err != nil {
-		return err
-	}
+			w.log.Info("Voiding all checks due to previous error")
+			msg := fmt.Sprintf("Failed initializing runtime: %s", err)
+			for _, ch := range w.job.Checks {
+				w.SetCheckError(ch.Plugin, msg)
+			}
+			if err := w.wrapUp(); err != nil {
+				w.log.Error("Error emitting wrap up signal", zap.Error(err))
+			}
 
-	if err = w.prepareRuntime(); err != nil {
-		return err
+			return err
+		}
+		w.earlyCancelCheck()
 	}
 
 	w.startContainers()
 
-	err = withBackoff(w.log, "emit wrap up signal", defaultAttemptCount, func() error {
-		return w.api.WrapUp(w.job)
-	})
-
-	if err != nil {
-		w.log.Error("Error pushing results", zap.Error(err))
+	if err = w.wrapUp(); err != nil {
+		w.log.Error("Error emitting wrap up signal", zap.Error(err))
 	}
 	return err
+}
+
+func (w *worker) wrapUp() error {
+	return withBackoff(w.log, "emit wrap up signal", defaultAttemptCount, func() error {
+		return w.api.WrapUp(w.job)
+	})
 }
 
 func (w *worker) acquireCommit() error {
@@ -446,33 +535,69 @@ func (w *worker) serviceContainer(cID string, done func()) {
 		}
 	}()
 
+	defer func() {
+		if err := recover(); err != nil {
+			if err == cancelledErr {
+				err := withBackoff(log, "setting canceled status", defaultAttemptCount, func() error {
+					return w.api.SetCheckCanceled(w.job, cInfo.Image)
+				})
+				if err != nil {
+					log.Error("Failed invoking SetCheckCanceled", zap.Error(err))
+				}
+			} else {
+				if notError, ok := err.(error); !ok {
+					err = fmt.Errorf("recovered from non-error value passed to panic: %s", notError)
+				}
+
+				log.Error("Recovered from panic", zap.Error(err.(error)))
+				err := withBackoff(log, "setting failure status", defaultAttemptCount, func() error {
+					return w.api.SetCheckError(w.job, cInfo.Image, err.(error).Error())
+				})
+				if err != nil {
+					log.Error("Failed invoking SetCheckError", zap.Error(err))
+				}
+			}
+		}
+	}()
+
 	if err := w.docker.ContainerStart(cID); err != nil {
 		log.Error("Failed starting container", zap.Error(err))
 		w.SetCheckError(cInfo.Image, fmt.Sprintf("Failed initializing container for %s: %s", cInfo.Image, err.Error()))
 		return
 	}
 
-	err := withBackoff(w.log, "setting running status", defaultAttemptCount, func() error {
+	w.operationCancelCheck()
+
+	err := withBackoff(log, "setting running status", defaultAttemptCount, func() error {
 		return w.api.SetCheckRunning(w.job, cInfo.Image)
 	})
 	if err != nil {
 		log.Error("Failed invoking SetCheckRunning", zap.Error(err))
 	}
 
+	w.operationCancelCheck()
+
 	log.Info("Container started. Waiting for completion...")
 	if err := w.docker.ContainerWait(cID); err != nil {
+		w.operationCancelCheck()
+
 		log.Error("Error waiting container", zap.Error(err))
 		w.SetCheckError(cInfo.Image, fmt.Sprintf("Failed waiting container result for %s: %s", cInfo.Image, err.Error()))
 		return
 	}
 
+	w.operationCancelCheck()
+
 	log.Info("Container finished. Copying results...")
 	containerOutput, exitStatus, err := w.docker.GetContainerResult(cID)
 	if err != nil {
+		w.operationCancelCheck()
 		log.Error("GetContainerResult failed", zap.Error(err))
 		w.SetCheckError(cInfo.Image, fmt.Sprintf("Failed obtaining result data for %s: %s", cInfo.Image, err.Error()))
 		return
 	}
+
+	w.operationCancelCheck()
 
 	log.Info("Reading output data...")
 	output, err := w.docker.GetContainerOutput(cInfo)
