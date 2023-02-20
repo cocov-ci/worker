@@ -124,4 +124,10 @@ func (r *Scheduler) Run() {
 		go w.Run()
 	}
 	wg.Wait()
+	r.redis.ShutdownControlChecks()
+}
+
+func (r *Scheduler) Shutdown() {
+	r.log.Info("Received shutdown signal")
+	r.redis.Shutdown()
 }

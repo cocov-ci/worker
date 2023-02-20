@@ -80,6 +80,7 @@ func (d dummyRunner) prime() { close(d.ok) }
 func TestScheduler_Run(t *testing.T) {
 	mocks, sch := makeScheduler(t)
 	mocks.redis.EXPECT().NextControlRequest().AnyTimes().Return(nil)
+	mocks.redis.EXPECT().ShutdownControlChecks()
 
 	var prime func()
 	wait := make(chan bool)

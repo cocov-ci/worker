@@ -1,11 +1,11 @@
 package commands
 
 import (
-	"os"
-
 	"github.com/urfave/cli/v2"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"os"
+	"os/signal"
 
 	"github.com/cocov-ci/worker/api"
 	"github.com/cocov-ci/worker/docker"
@@ -72,7 +72,28 @@ func Run(ctx *cli.Context) error {
 	}
 
 	jobRunner := runner.New(maxJobs, apiClient, dockerClient, redisClient, store)
+
+	signalChan := make(chan os.Signal)
+	signal.Notify(signalChan, os.Interrupt)
+	go func() {
+		stopping := false
+		for {
+			<-signalChan
+			if !stopping {
+				stopping = true
+				logger.Info("Received interrupt signal. Will exit once jobs in progress are finished")
+				jobRunner.Shutdown()
+			} else {
+				logger.Info("If you insist... Received second interrupt signal. Forcefully exiting.")
+				logger.Warn("Forcefully exiting worker. Jobs in execution may be left dangling on API, and temporary files won't be removed.")
+				os.Exit(0)
+			}
+		}
+	}()
+
 	jobRunner.Run()
+
+	logger.Info("See you later!")
 
 	return nil
 }

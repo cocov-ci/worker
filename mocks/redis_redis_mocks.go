@@ -76,6 +76,30 @@ func (mr *RedisMockMockRecorder) Ping() *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Ping", reflect.TypeOf((*RedisMock)(nil).Ping))
 }
 
+// Shutdown mocks base method.
+func (m *RedisMock) Shutdown() {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "Shutdown")
+}
+
+// Shutdown indicates an expected call of Shutdown.
+func (mr *RedisMockMockRecorder) Shutdown() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Shutdown", reflect.TypeOf((*RedisMock)(nil).Shutdown))
+}
+
+// ShutdownControlChecks mocks base method.
+func (m *RedisMock) ShutdownControlChecks() {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "ShutdownControlChecks")
+}
+
+// ShutdownControlChecks indicates an expected call of ShutdownControlChecks.
+func (mr *RedisMockMockRecorder) ShutdownControlChecks() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ShutdownControlChecks", reflect.TypeOf((*RedisMock)(nil).ShutdownControlChecks))
+}
+
 // Start mocks base method.
 func (m *RedisMock) Start() {
 	m.ctrl.T.Helper()
@@ -86,18 +110,6 @@ func (m *RedisMock) Start() {
 func (mr *RedisMockMockRecorder) Start() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Start", reflect.TypeOf((*RedisMock)(nil).Start))
-}
-
-// Stop mocks base method.
-func (m *RedisMock) Stop() {
-	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "Stop")
-}
-
-// Stop indicates an expected call of Stop.
-func (mr *RedisMockMockRecorder) Stop() *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Stop", reflect.TypeOf((*RedisMock)(nil).Stop))
 }
 
 // Wait mocks base method.

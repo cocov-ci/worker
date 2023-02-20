@@ -56,7 +56,7 @@ func TestClient(t *testing.T) {
 
 	t.Run("stop", func(t *testing.T) {
 		test_helpers.Timeout(t, 3*time.Second, func() {
-			c.Stop()
+			c.Shutdown()
 			c.Wait()
 			wg.Wait()
 		})

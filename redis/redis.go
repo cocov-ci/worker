@@ -14,9 +14,10 @@ type Client interface {
 	Next() *Job
 	Ping() error
 	Start()
-	Stop()
 	Wait()
 	NextControlRequest() any
+	Shutdown()
+	ShutdownControlChecks()
 }
 
 func New(url string) (Client, error) {
@@ -63,10 +64,10 @@ func (c *client) Ping() error {
 	return c.c.Ping(ctx).Err()
 }
 
-func (c *client) Stop() {
+func (c *client) Shutdown() {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	if c.stopped {
+		c.mu.Unlock()
 		return
 	}
 
@@ -74,6 +75,13 @@ func (c *client) Stop() {
 	c.stopped = true
 	close(c.want)
 	c.log.Info("Stopped. Stand by for drainage...")
+	c.mu.Unlock()
+	<-c.stop
+	c.log.Info("Drain complete.")
+}
+
+func (c *client) ShutdownControlChecks() {
+	c.log.Info("Disabling control checks")
 	close(c.controlRequests)
 	c.closeControl <- true
 	close(c.closeControl)
@@ -107,6 +115,9 @@ func (c *client) Start() {
 			dataSlice, err := c.c.BLPop(context.Background(), 5*time.Second, "cocov:checks").Result()
 			if err == redis.Nil {
 				backoff = 1
+				if c.stopped {
+					break
+				}
 				continue
 			} else if err != nil {
 				toSleep := time.Duration(backoff) * time.Second
