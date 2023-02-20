@@ -110,6 +110,10 @@ func TestWorker_Run(t *testing.T) {
 
 	// Docker setup
 	m.docker.EXPECT().PullImage("foo").AnyTimes().Return(fmt.Errorf("boom"))
+
+	// API setup
+	m.api.EXPECT().SetSetRunning(job).Return(nil)
+	m.api.EXPECT().WrapUp(job).Return(nil)
 	m.api.EXPECT().SetCheckError(gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes().Return(nil)
 
 	// Test
@@ -129,6 +133,10 @@ func TestWorker_RunAcquireCommitFailure(t *testing.T) {
 
 	// Storage setup
 	m.storage.EXPECT().DownloadCommit("c", "d", gomock.Any()).AnyTimes().Return(fmt.Errorf("boom"))
+
+	// API setup
+	m.api.EXPECT().SetCheckError(w.job, "foo", "Failed initializing runtime: could not download c@d; all attempts failed. Last error: boom").Return(nil)
+	m.api.EXPECT().WrapUp(w.job).Return(nil)
 
 	assert.ErrorContains(t, w.perform(), "all attempts failed")
 }
@@ -153,6 +161,10 @@ func TestWorker_RunPrepareRuntimeFailure(t *testing.T) {
 
 	// Storage Setup
 	m.storage.EXPECT().DownloadCommit("c", "d", gomock.Any()).Times(1).Return(nil)
+
+	// API setup
+	m.api.EXPECT().SetCheckError(w.job, "foo", "Failed initializing runtime: boom").Return(nil)
+	m.api.EXPECT().WrapUp(w.job).Return(nil)
 
 	assert.ErrorContains(t, w.perform(), "boom")
 }
@@ -196,6 +208,13 @@ func TestWorker_RunPrepareRuntimeFailureCleanup(t *testing.T) {
 
 	// Storage Setup
 	m.storage.EXPECT().DownloadCommit("c", "d", gomock.Any()).Times(1).Return(nil)
+
+	// API setup
+	gomock.InOrder(
+		m.api.EXPECT().SetCheckError(w.job, "foo", "Failed initializing runtime: boom").Return(nil),
+		m.api.EXPECT().SetCheckError(w.job, "bar", "Failed initializing runtime: boom").Return(nil),
+		m.api.EXPECT().WrapUp(w.job).Return(nil),
+	)
 
 	assert.ErrorContains(t, w.perform(), "boom")
 	assert.Empty(t, w.containers)
@@ -455,6 +474,9 @@ func TestWorker_RunFull(t *testing.T) {
 
 	// --- perform begins here
 
+	// Set CheckSet as running
+	m.api.EXPECT().SetSetRunning(w.job).Return(nil)
+
 	// downloadImages
 	m.docker.EXPECT().PullImage("foo")
 
@@ -492,6 +514,7 @@ func TestWorker_RunFull(t *testing.T) {
 	m.docker.EXPECT().ContainerWait("a").Return(nil)
 	m.docker.EXPECT().GetContainerResult("a").Return(&bytes.Buffer{}, 0, nil)
 	m.docker.EXPECT().GetContainerOutput(w.containers["a"]).Return(issues, nil)
+	m.docker.EXPECT().RemoveVolume(volume).Return(nil)
 	m.docker.EXPECT().AbortAndRemove(createResult).AnyTimes().Return(nil)
 
 	// Back to perform

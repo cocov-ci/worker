@@ -58,6 +58,7 @@ type Client interface {
 	SetCheckRunning(job *redis.Job, plugin string) error
 	SetCheckSucceeded(job *redis.Job, plugin string) error
 	SetCheckCanceled(job *redis.Job, plugin string) error
+	SetSetRunning(job *redis.Job) error
 	PushIssues(job *redis.Job, plugin string, issues any) error
 	WrapUp(job *redis.Job) error
 	GetSecret(secret *redis.Mount) ([]byte, error)
@@ -165,6 +166,12 @@ func (a api) PushIssues(job *redis.Job, plugin string, issues any) error {
 
 func (a api) WrapUp(job *redis.Job) error {
 	_, err := a.do("POST", fmt.Sprintf("/v1/repositories/%d/commits/%s/checks/wrap_up", job.RepoID, job.Commitish), &grequests.RequestOptions{})
+
+	return err
+}
+
+func (a api) SetSetRunning(job *redis.Job) error {
+	_, err := a.do("POST", fmt.Sprintf("/v1/repositories/%d/commits/%s/check_set/notify_processing", job.RepoID, job.Commitish), &grequests.RequestOptions{})
 
 	return err
 }

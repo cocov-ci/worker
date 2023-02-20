@@ -165,3 +165,15 @@ func (mr *DockerMockMockRecorder) RemoveVolume(vol interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RemoveVolume", reflect.TypeOf((*DockerMock)(nil).RemoveVolume), vol)
 }
+
+// TerminateContainer mocks base method.
+func (m *DockerMock) TerminateContainer(v *docker.CreateContainerResult) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "TerminateContainer", v)
+}
+
+// TerminateContainer indicates an expected call of TerminateContainer.
+func (mr *DockerMockMockRecorder) TerminateContainer(v interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TerminateContainer", reflect.TypeOf((*DockerMock)(nil).TerminateContainer), v)
+}
