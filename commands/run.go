@@ -21,6 +21,7 @@ func Run(ctx *cli.Context) error {
 	apiURL := ctx.String("api-url")
 	serviceToken := ctx.String("service-token")
 	storageMode := ctx.String("gs-storage-mode")
+	cacheServerURL := ctx.String("cache-server-url")
 	isDevelopment := os.Getenv("COCOV_WORKER_DEV") == "true"
 
 	var logger *zap.Logger
@@ -53,7 +54,7 @@ func Run(ctx *cli.Context) error {
 		return err
 	}
 
-	dockerClient, err := docker.New(dockerSocket)
+	dockerClient, err := docker.New(dockerSocket, cacheServerURL)
 	if err != nil {
 		logger.Error("Failed initializing Docker client", zap.Error(err))
 		return err
@@ -73,7 +74,7 @@ func Run(ctx *cli.Context) error {
 
 	jobRunner := runner.New(maxJobs, apiClient, dockerClient, redisClient, store)
 
-	signalChan := make(chan os.Signal)
+	signalChan := make(chan os.Signal, 10)
 	signal.Notify(signalChan, os.Interrupt)
 	go func() {
 		stopping := false

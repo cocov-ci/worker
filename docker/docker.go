@@ -26,6 +26,7 @@ import (
 )
 
 type RunInformation struct {
+	JobID        string
 	Image        string
 	RepoName     string
 	Commitish    string
@@ -58,15 +59,16 @@ type Client interface {
 	TerminateContainer(v *CreateContainerResult)
 }
 
-func New(host string) (Client, error) {
+func New(host string, cacheServerURL string) (Client, error) {
 	cli, err := client.NewClientWithOpts(client.WithHost(host), client.WithAPIVersionNegotiation())
 	if err != nil {
 		return nil, err
 	}
 
 	c := &clientImpl{
-		log: zap.L().With(zap.String("facility", "docker")),
-		d:   cli,
+		log:            zap.L().With(zap.String("facility", "docker")),
+		d:              cli,
+		cacheServerURL: cacheServerURL,
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -80,12 +82,18 @@ func New(host string) (Client, error) {
 		zap.String("api_version", t.APIVersion),
 		zap.String("os_type", t.OSType),
 		zap.String("builder_version", string(t.BuilderVersion)))
+
+	if c.cacheServerURL != "" {
+		c.log.Info("Support to Cache is enabled to Plugins supporting it.", zap.String("cache_server_url", cacheServerURL))
+	}
+
 	return c, nil
 }
 
 type clientImpl struct {
-	log *zap.Logger
-	d   *client.Client
+	log            *zap.Logger
+	d              *client.Client
+	cacheServerURL string
 }
 
 func (c *clientImpl) PrepareVolume(brotliPath string) (*PrepareVolumeResult, error) {
@@ -233,15 +241,21 @@ func (c *clientImpl) CreateContainer(info *RunInformation) (*CreateContainerResu
 	{
 		env := map[string]string{}
 		systemEnvs := map[string]string{
-			"COCOV_WORKDIR":     "/work/" + workDirTarget,
-			"COCOV_REPO_NAME":   info.RepoName,
-			"COCOV_COMMIT_SHA":  info.Commitish,
-			"COCOV_OUTPUT_FILE": "/tmp/" + outputTarget,
+			"COCOV_WORKDIR":        "/work/" + workDirTarget,
+			"COCOV_REPO_NAME":      info.RepoName,
+			"COCOV_COMMIT_SHA":     info.Commitish,
+			"COCOV_OUTPUT_FILE":    "/tmp/" + outputTarget,
+			"COCOV_JOB_IDENTIFIER": info.JobID,
+		}
+
+		if url := c.cacheServerURL; url != "" {
+			systemEnvs["COCOV_CACHE_SERVER_URL"] = url
 		}
 
 		for k, v := range info.Envs {
 			env[k] = v
 		}
+
 		for k, v := range systemEnvs {
 			env[k] = v
 		}
