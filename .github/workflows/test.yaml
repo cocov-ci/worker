@@ -1,10 +1,18 @@
 name: Test
 
-on: [push, pull_request]
+on:
+  push:
+    branches:
+    - master
+  pull_request:
 
 jobs:
   test:
     runs-on: ubuntu-latest
+
+    env:
+      COCOV_REPOSITORY_TOKEN: ${{ secrets.COCOV_REPOSITORY_TOKEN }}
+      COCOV_API_URL: ${{ secrets.COCOV_API_URL }}
 
     services:
       redis:
@@ -34,5 +42,14 @@ jobs:
     - name: Download image
       run: docker pull alpine
 
+    - name: Prepare coverage-reporter
+      run: |
+        curl -sSL https://vito.io/private/coverage-reporter > .coverage-reporter
+        chmod +x .coverage-reporter
+        ./.coverage-reporter prepare
+
     - name: Test
-      run: go test -v ./...
+      run: go test -v ./... -covermode=count -coverprofile=c.out
+
+    - name: Push coverage report
+      run: ./.coverage-reporter submit

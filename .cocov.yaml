@@ -1,0 +1,6 @@
+version: "0.1.alpha"
+
+checks:
+  - plugin: cocov/golangci-lint:v0.1
+  - plugin: cocov/staticcheck:v0.1
+  - plugin: cocov/revive:v0.1
