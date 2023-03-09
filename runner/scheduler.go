@@ -48,10 +48,11 @@ type Scheduler struct {
 	stopped       bool
 	mu            *sync.Mutex
 
-	api     api.Client
-	docker  docker.Client
-	redis   redis.Client
-	storage storage.Base
+	api            api.Client
+	docker         docker.Client
+	redis          redis.Client
+	storage        storage.Base
+	cacheServerURL string
 
 	workerFactory func(done func()) runnable
 	workers       map[int]runnable

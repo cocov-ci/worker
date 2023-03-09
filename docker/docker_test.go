@@ -18,7 +18,7 @@ import (
 
 func makeClient(t *testing.T) *clientImpl {
 	zap.ReplaceGlobals(zap.NewNop())
-	c, err := New("unix:///var/run/docker.sock")
+	c, err := New("unix:///var/run/docker.sock", "")
 	require.NoError(t, err)
 	return c.(*clientImpl)
 }
