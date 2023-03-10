@@ -31,7 +31,7 @@ func TestDockerPullImage(t *testing.T) {
 
 func TestCreateContainer(t *testing.T) {
 	c := makeClient(t)
-	volume, err := c.PrepareVolume(filepath.Join(test_helpers.GitRoot(t), "storage", "fixtures", "test.tar.br"))
+	volume, err := c.PrepareVolume(filepath.Join(test_helpers.GitRoot(t), "storage", "fixtures", "test.tar.zst"))
 	require.NoError(t, err)
 
 	r := RunInformation{
@@ -78,7 +78,7 @@ func TestCreateContainer(t *testing.T) {
 }
 
 func TestClientImpl_PrepareVolume(t *testing.T) {
-	root := filepath.Join(test_helpers.GitRoot(t), "storage", "fixtures", "test.tar.br")
+	root := filepath.Join(test_helpers.GitRoot(t), "storage", "fixtures", "test.tar.zst")
 	c := makeClient(t)
 	vol, err := c.PrepareVolume(root)
 	require.NoError(t, err)

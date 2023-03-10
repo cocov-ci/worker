@@ -67,7 +67,7 @@ func TestInflateBrotli(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(tmpdir)
 
-	err = InflateBrotli(filepath.Join(root, "storage", "fixtures", "test.tar.br"), func(s string) error {
+	err = InflateZstd(filepath.Join(root, "storage", "fixtures", "test.tar.zst"), func(s string) error {
 		return untar(s, tmpdir)
 	})
 	require.NoError(t, err)

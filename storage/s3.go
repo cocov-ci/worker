@@ -78,14 +78,14 @@ func (s S3Storage) download(key string, into *os.File) error {
 
 func (s S3Storage) DownloadCommit(repository, commitish, into string) error {
 	path := s.CommitPath(repository, commitish)
-	brotliPath := path + ".tar.br"
-	shasumPath := brotliPath + ".shasum"
+	zstPath := path + ".tar.zst"
+	shasumPath := zstPath + ".shasum"
 
 	s.log.Info("Downloading compressed repository image from S3",
-		zap.String("key", brotliPath),
+		zap.String("key", zstPath),
 		zap.Stringp("bucket", s.bucketName))
 
-	outSha, err := os.CreateTemp("", "img.*.tar.br.shasum")
+	outSha, err := os.CreateTemp("", "img.*.tar.zst.shasum")
 	if err != nil {
 		return err
 	}
@@ -97,7 +97,7 @@ func (s S3Storage) DownloadCommit(repository, commitish, into string) error {
 		return err
 	}
 
-	if err = s.download(brotliPath, f); err != nil {
+	if err = s.download(zstPath, f); err != nil {
 		return err
 	}
 

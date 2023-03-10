@@ -45,7 +45,7 @@ func TestS3Download(t *testing.T) {
 		s, err := NewS3("cocov-storage")
 		require.NoError(t, err)
 
-		err = s.(S3Storage).download("32a6fcbaa4543f0718079837a574f5835f3143fe/9cff62ad797c372277f6c6b71d10e643947b5340.tar.br.shasum", tmp)
+		err = s.(S3Storage).download("32a6fcbaa4543f0718079837a574f5835f3143fe/9cff62ad797c372277f6c6b71d10e643947b5340.tar.zst.shasum", tmp)
 		assert.NoError(t, err)
 		assert.NoError(t, tmp.Close())
 		data, err := os.ReadFile(tmp.Name())

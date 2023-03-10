@@ -42,7 +42,7 @@ func (l LocalStorage) CommitPath(repository, commitish string) string {
 }
 
 func (l LocalStorage) DownloadCommit(repository, commitish, into string) error {
-	itemPath := l.CommitPath(repository, commitish) + ".tar.br"
+	itemPath := l.CommitPath(repository, commitish) + ".tar.zst"
 	shaPath := itemPath + ".shasum"
 	if err := validateSha(shaPath, itemPath); err != nil {
 		return err

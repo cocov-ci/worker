@@ -55,7 +55,7 @@ type Client interface {
 	GetContainerOutput(result *CreateContainerResult) (output []byte, err error)
 	ContainerStart(id string) error
 	RemoveVolume(vol *PrepareVolumeResult) error
-	PrepareVolume(brotliPath string) (*PrepareVolumeResult, error)
+	PrepareVolume(zstPath string) (*PrepareVolumeResult, error)
 	TerminateContainer(v *CreateContainerResult)
 }
 
@@ -96,7 +96,7 @@ type clientImpl struct {
 	cacheServerURL string
 }
 
-func (c *clientImpl) PrepareVolume(brotliPath string) (*PrepareVolumeResult, error) {
+func (c *clientImpl) PrepareVolume(zstPath string) (*PrepareVolumeResult, error) {
 	tmpTar, err := os.CreateTemp("", "")
 	if err != nil {
 		return nil, fmt.Errorf("error creating temporary file: %w", err)
@@ -166,7 +166,7 @@ func (c *clientImpl) PrepareVolume(brotliPath string) (*PrepareVolumeResult, err
 		return nil, fmt.Errorf("error copying extractor script to container: %w", err)
 	}
 
-	err = storage.InflateBrotli(brotliPath, func(s string) error {
+	err = storage.InflateZstd(zstPath, func(s string) error {
 		// tar the tar to make Docker happy
 		_, err := execute.Exec([]string{"tar", "-cf", tmpTar.Name(), filepath.Base(s)}, &execute.Opts{
 			Cwd: filepath.Dir(s),

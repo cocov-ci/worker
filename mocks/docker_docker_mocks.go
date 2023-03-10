@@ -124,18 +124,18 @@ func (mr *DockerMockMockRecorder) GetContainerResult(id interface{}) *gomock.Cal
 }
 
 // PrepareVolume mocks base method.
-func (m *DockerMock) PrepareVolume(brotliPath string) (*docker.PrepareVolumeResult, error) {
+func (m *DockerMock) PrepareVolume(zstPath string) (*docker.PrepareVolumeResult, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "PrepareVolume", brotliPath)
+	ret := m.ctrl.Call(m, "PrepareVolume", zstPath)
 	ret0, _ := ret[0].(*docker.PrepareVolumeResult)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // PrepareVolume indicates an expected call of PrepareVolume.
-func (mr *DockerMockMockRecorder) PrepareVolume(brotliPath interface{}) *gomock.Call {
+func (mr *DockerMockMockRecorder) PrepareVolume(zstPath interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PrepareVolume", reflect.TypeOf((*DockerMock)(nil).PrepareVolume), brotliPath)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PrepareVolume", reflect.TypeOf((*DockerMock)(nil).PrepareVolume), zstPath)
 }
 
 // PullImage mocks base method.

@@ -295,9 +295,9 @@ func (w *worker) acquireCommit() error {
 	w.log.Info("Acquiring commit",
 		zap.String("repository", w.job.Repo),
 		zap.String("sha", w.job.Commitish))
-	brPath := filepath.Join(w.commitDir, w.job.Commitish+".tar.br")
+	zstPath := filepath.Join(w.commitDir, w.job.Commitish+".tar.zst")
 	err := withBackoff(w.log, "downloading commit", defaultAttemptCount, func() error {
-		err := w.storage.DownloadCommit(w.job.Repo, w.job.Commitish, brPath)
+		err := w.storage.DownloadCommit(w.job.Repo, w.job.Commitish, zstPath)
 		if err != nil {
 			w.log.Error("Error acquiring commit",
 				zap.String("repo", w.job.Repo),
@@ -314,7 +314,7 @@ func (w *worker) acquireCommit() error {
 	w.log.Info("Preparing source volume",
 		zap.String("repository", w.job.Repo),
 		zap.String("sha", w.job.Commitish))
-	vol, err := w.docker.PrepareVolume(brPath)
+	vol, err := w.docker.PrepareVolume(zstPath)
 	if err != nil {
 		w.log.Info("Failed preparing source volume",
 			zap.String("repository", w.job.Repo),

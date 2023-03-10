@@ -90,7 +90,7 @@ func validateSha(sumPath, itemPath string) error {
 	return nil
 }
 
-func InflateBrotli(source string, then func(string) error) error {
+func InflateZstd(source string, then func(string) error) error {
 	rawTmpFile, err := os.CreateTemp("", "")
 	if err != nil {
 		return err
@@ -104,8 +104,8 @@ func InflateBrotli(source string, then func(string) error) error {
 	}
 	tmpPath = tmpPath + ".tar"
 
-	if _, err := execute.Exec([]string{"brotli", "-d", source, "-o", tmpPath}, nil); err != nil {
-		return fmt.Errorf("executing brotli failed: %w", err)
+	if _, err := execute.Exec([]string{"zstd", "-d", source, "-o", tmpPath}, nil); err != nil {
+		return fmt.Errorf("executing zstd failed: %w", err)
 	}
 
 	defer func() { _ = os.Remove(tmpPath) }()
