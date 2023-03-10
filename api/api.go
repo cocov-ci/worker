@@ -123,7 +123,7 @@ func (a api) SetCheckRunning(job *redis.Job, plugin string) error {
 	_, err := a.do("PATCH", fmt.Sprintf("/v1/repositories/%d/commits/%s/checks", job.RepoID, job.Commitish), &grequests.RequestOptions{
 		JSON: map[string]any{
 			"plugin_name": strings.SplitN(plugin, ":", 2)[0],
-			"status":      "running",
+			"status":      "in_progress",
 		},
 	})
 
@@ -134,7 +134,7 @@ func (a api) SetCheckSucceeded(job *redis.Job, plugin string) error {
 	_, err := a.do("PATCH", fmt.Sprintf("/v1/repositories/%d/commits/%s/checks", job.RepoID, job.Commitish), &grequests.RequestOptions{
 		JSON: map[string]any{
 			"plugin_name": strings.SplitN(plugin, ":", 2)[0],
-			"status":      "succeeded",
+			"status":      "completed",
 		},
 	})
 
@@ -171,7 +171,7 @@ func (a api) WrapUp(job *redis.Job) error {
 }
 
 func (a api) SetSetRunning(job *redis.Job) error {
-	_, err := a.do("POST", fmt.Sprintf("/v1/repositories/%d/commits/%s/check_set/notify_processing", job.RepoID, job.Commitish), &grequests.RequestOptions{})
+	_, err := a.do("POST", fmt.Sprintf("/v1/repositories/%d/commits/%s/check_set/notify_in_progress", job.RepoID, job.Commitish), &grequests.RequestOptions{})
 
 	return err
 }
