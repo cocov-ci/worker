@@ -2,6 +2,7 @@ package storage
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -47,5 +48,32 @@ func (l LocalStorage) DownloadCommit(repository, commitish, into string) error {
 	if err := validateSha(shaPath, itemPath); err != nil {
 		return err
 	}
-	return os.Link(itemPath, into)
+	return fsCopy(itemPath, into)
+}
+
+func fsCopy(from, to string) error {
+	original, err := os.Open(from)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = original.Close() }()
+
+	// Create new file
+	dst, err := os.Create(to)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = dst.Close() }()
+
+	_, err = io.Copy(dst, original)
+	if err != nil {
+		return err
+	}
+
+	if err = dst.Sync(); err != nil {
+		_ = os.Remove(to)
+		return err
+	}
+
+	return nil
 }
