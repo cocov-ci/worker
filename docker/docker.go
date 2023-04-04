@@ -25,6 +25,14 @@ import (
 	"github.com/cocov-ci/worker/support"
 )
 
+type ClientOpts struct {
+	Socket         string
+	CacheServerURL string
+	TLSCAPath      string
+	TLSKeyPath     string
+	TLSCertPath    string
+}
+
 type RunInformation struct {
 	JobID        string
 	Image        string
@@ -59,8 +67,36 @@ type Client interface {
 	TerminateContainer(v *CreateContainerResult)
 }
 
-func New(host string, cacheServerURL string) (Client, error) {
-	cli, err := client.NewClientWithOpts(client.WithHost(host), client.WithAPIVersionNegotiation())
+func ensureAll(values ...string) bool {
+	empty := false
+	present := false
+	for _, str := range values {
+		if str == "" {
+			empty = true
+		}
+		if str != "" {
+			present = true
+		}
+	}
+
+	return (!empty && present) || (empty && !present)
+}
+
+func New(opts ClientOpts) (Client, error) {
+	clientOpts := []client.Opt{
+		client.WithHost(opts.Socket),
+		client.WithAPIVersionNegotiation(),
+	}
+
+	if !ensureAll(opts.TLSKeyPath, opts.TLSCAPath, opts.TLSCertPath) {
+		return nil, fmt.Errorf("either all TLS properties must be provided, or none")
+	}
+
+	if opts.TLSCAPath != "" {
+		clientOpts = append(clientOpts, client.WithTLSClientConfig(opts.TLSCAPath, opts.TLSCertPath, opts.TLSKeyPath))
+	}
+
+	cli, err := client.NewClientWithOpts(clientOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -68,7 +104,7 @@ func New(host string, cacheServerURL string) (Client, error) {
 	c := &clientImpl{
 		log:            zap.L().With(zap.String("facility", "docker")),
 		d:              cli,
-		cacheServerURL: cacheServerURL,
+		cacheServerURL: opts.CacheServerURL,
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -84,7 +120,7 @@ func New(host string, cacheServerURL string) (Client, error) {
 		zap.String("builder_version", string(t.BuilderVersion)))
 
 	if c.cacheServerURL != "" {
-		c.log.Info("Support to Cache is enabled to Plugins supporting it.", zap.String("cache_server_url", cacheServerURL))
+		c.log.Info("Support to Cache is enabled to Plugins supporting it.", zap.String("cache_server_url", opts.CacheServerURL))
 	}
 
 	return c, nil

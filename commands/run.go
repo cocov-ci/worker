@@ -22,6 +22,9 @@ func Run(ctx *cli.Context) error {
 	serviceToken := ctx.String("service-token")
 	storageMode := ctx.String("gs-storage-mode")
 	cacheServerURL := ctx.String("cache-server-url")
+	dockerTLSCAPath := ctx.String("docker-tls-ca-path")
+	dockerTLSCertPath := ctx.String("docker-tls-cert-path")
+	dockerTLSKeyPath := ctx.String("docker-tls-key-path")
 	isDevelopment := os.Getenv("COCOV_WORKER_DEV") == "true"
 
 	var logger *zap.Logger
@@ -54,7 +57,13 @@ func Run(ctx *cli.Context) error {
 		return err
 	}
 
-	dockerClient, err := docker.New(dockerSocket, cacheServerURL)
+	dockerClient, err := docker.New(docker.ClientOpts{
+		Socket:         dockerSocket,
+		CacheServerURL: cacheServerURL,
+		TLSCAPath:      dockerTLSCAPath,
+		TLSKeyPath:     dockerTLSKeyPath,
+		TLSCertPath:    dockerTLSCertPath,
+	})
 	if err != nil {
 		logger.Error("Failed initializing Docker client", zap.Error(err))
 		return err
