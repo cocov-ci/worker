@@ -6,6 +6,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"time"
@@ -261,6 +263,34 @@ func (c *clientImpl) PullImage(name string) error {
 	return err
 }
 
+func (c *clientImpl) resolveCacheServerURL(rawUrl string) ([]string, error) {
+	parsed, err := url.Parse(rawUrl)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	hostname := parsed.Hostname()
+	ips, err := net.DefaultResolver.LookupIP(ctx, "ip", hostname)
+
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]string, 0, len(ips))
+	for _, ip := range ips {
+		ipStr := ip.String()
+		// IP.String indicates that it returns "<nil>" on zero-length ips, but
+		// it seems there's no way to check an IP's length beforehand.
+		if ipStr[0] == '<' {
+			continue
+		}
+		result = append(result, hostname+":"+ip.String())
+	}
+
+	return result, nil
+}
+
 func (c *clientImpl) CreateContainer(info *RunInformation) (*CreateContainerResult, error) {
 	tempFile, err := os.CreateTemp("", "")
 	if err != nil {
@@ -274,6 +304,7 @@ func (c *clientImpl) CreateContainer(info *RunInformation) (*CreateContainerResu
 	outputTarget := uuid.Generate().String()
 
 	var envs []string
+	var extraHosts []string
 	{
 		env := map[string]string{}
 		systemEnvs := map[string]string{
@@ -284,8 +315,17 @@ func (c *clientImpl) CreateContainer(info *RunInformation) (*CreateContainerResu
 			"COCOV_JOB_IDENTIFIER": info.JobID,
 		}
 
-		if url := c.cacheServerURL; url != "" {
-			systemEnvs["COCOV_CACHE_SERVER_URL"] = url
+		if rawUrl := c.cacheServerURL; rawUrl != "" {
+			extra, err := c.resolveCacheServerURL(rawUrl)
+			if err != nil {
+				c.log.Error("Could not resolve cache server URL. Caching will be disabled for this plugin",
+					zap.String("job_id", info.JobID),
+					zap.String("plugin", info.Image),
+					zap.Error(err))
+			} else {
+				systemEnvs["COCOV_CACHE_SERVICE_URL"] = rawUrl
+				extraHosts = extra
+			}
 		}
 
 		for k, v := range info.Envs {
@@ -302,21 +342,13 @@ func (c *clientImpl) CreateContainer(info *RunInformation) (*CreateContainerResu
 		}
 	}
 
-	mounts := make([]mount.Mount, 0, len(info.Mounts)+1)
-	mounts = append(mounts, mount.Mount{
-		Type:     mount.TypeVolume,
-		Source:   info.SourceVolume.VolumeID,
-		Target:   "/work/" + workDirTarget,
-		ReadOnly: true,
-	})
-
-	for from, to := range info.Mounts {
-		mounts = append(mounts, mount.Mount{
-			Type:     mount.TypeBind,
-			Source:   from,
-			Target:   to,
+	mounts := []mount.Mount{
+		{
+			Type:     mount.TypeVolume,
+			Source:   info.SourceVolume.VolumeID,
+			Target:   "/work/" + workDirTarget,
 			ReadOnly: true,
-		})
+		},
 	}
 
 	var cmd []string
@@ -333,6 +365,7 @@ func (c *clientImpl) CreateContainer(info *RunInformation) (*CreateContainerResu
 		AutoRemove: false,
 		Mounts:     mounts,
 		CapDrop:    strslice.StrSlice{"dac_override", "setgid", "setuid", "setpcap", "net_raw", "sys_chroot", "mknod", "audit_write"},
+		ExtraHosts: extraHosts,
 	}, nil, nil, "")
 
 	if err != nil {
@@ -340,11 +373,81 @@ func (c *clientImpl) CreateContainer(info *RunInformation) (*CreateContainerResu
 	}
 
 	c.log.Info("Created container", zap.String("id", res.ID))
-	return &CreateContainerResult{
+	result := &CreateContainerResult{
 		ContainerID: res.ID,
 		OutputFile:  "/tmp/" + outputTarget,
 		Image:       info.Image,
-	}, nil
+	}
+
+	if err = c.copyMountsToContainer(result, info.Mounts); err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
+func (c *clientImpl) copyMountsToContainer(container *CreateContainerResult, mounts map[string]string) error {
+	removeContainer := func() {
+		if err := c.AbortAndRemove(container); err != nil {
+			c.log.Error("Failed removing container after previous error", zap.Error(err))
+		}
+	}
+	buf := bytes.Buffer{}
+	for from, to := range mounts {
+		log := c.log.With(zap.String("source", from), zap.String("destination", to))
+		f, err := os.Open(from)
+		if err != nil {
+			log.Error("Failed opening mount source", zap.Error(err))
+			removeContainer()
+			return fmt.Errorf("failed opening mount source '%s': %w", from, err)
+		}
+
+		stat, err := f.Stat()
+		if err != nil {
+			log.Error("Failed stating mount source", zap.Error(err))
+			_ = f.Close()
+			removeContainer()
+			return fmt.Errorf("failed stating mount source '%s': %w", from, err)
+		}
+
+		buf.Reset()
+		writer := tar.NewWriter(&buf)
+		hdr := &tar.Header{
+			Name: filepath.Base(to),
+			Mode: 0655,
+			Size: stat.Size(),
+		}
+		if err = writer.WriteHeader(hdr); err != nil {
+			log.Error("Failed writing tar header for mount", zap.Error(err))
+			_ = f.Close()
+			removeContainer()
+			return fmt.Errorf("failed writing tar header for '%s': %w", from, err)
+		}
+
+		if _, err = io.Copy(writer, f); err != nil {
+			log.Error("Failed copying mount data into tar writer", zap.Error(err))
+			_ = f.Close()
+			removeContainer()
+			return fmt.Errorf("failed copying mount source '%s' into tar writer: %w", from, err)
+		}
+
+		if err = writer.Close(); err != nil {
+			log.Error("Failed closing tar stream", zap.Error(err))
+			_ = f.Close()
+			removeContainer()
+			return fmt.Errorf("failed closing tar stream for mount source '%s': %w", from, err)
+		}
+
+		_ = f.Close()
+
+		err = c.d.CopyToContainer(context.Background(), container.ContainerID, filepath.Dir(to), &buf, types.CopyToContainerOptions{})
+		if err != nil {
+			log.Error("Failed copying mount source into container", zap.String("container_id", container.ContainerID), zap.Error(err))
+			return fmt.Errorf("failed copying mount source '%s' into container '%s': %w", from, container.ContainerID, err)
+		}
+	}
+
+	return nil
 }
 
 func (c *clientImpl) AbortAndRemove(container *CreateContainerResult) error {

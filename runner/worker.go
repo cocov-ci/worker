@@ -1,13 +1,13 @@
 package runner
 
 import (
-	"bytes"
 	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -41,17 +41,30 @@ func withBackoff(log *zap.Logger, operationName string, maxTries int, fn func() 
 
 const defaultAttemptCount = 10
 
-func newWorker(log *zap.Logger, id int, scheduler IndirectScheduler, dockerClient docker.Client, apiClient api.Client, storageClient storage.Base, redisClient redis.Client, done func()) *worker {
-	return &worker{
-		id:   id,
-		log:  log.With(zap.Int("worker_id", id)),
-		done: done,
+type workerOpts struct {
+	log           *zap.Logger
+	id            int
+	scheduler     IndirectScheduler
+	dockerClient  docker.Client
+	apiClient     api.Client
+	storageClient storage.Base
+	redisClient   redis.Client
+	done          func()
+	debugPlugins  bool
+}
 
-		scheduler:  scheduler,
-		docker:     dockerClient,
-		api:        apiClient,
-		storage:    storageClient,
-		redis:      redisClient,
+func newWorker(opts workerOpts) *worker {
+	return &worker{
+		id:   opts.id,
+		log:  opts.log.With(zap.Int("worker_id", opts.id)),
+		done: opts.done,
+
+		scheduler:  opts.scheduler,
+		docker:     opts.dockerClient,
+		api:        opts.apiClient,
+		storage:    opts.storageClient,
+		redis:      opts.redisClient,
+		debug:      opts.debugPlugins,
 		jobStateMu: &sync.Mutex{},
 		cancelMu:   &sync.Mutex{},
 
@@ -83,6 +96,7 @@ type worker struct {
 
 	cancelMu *sync.Mutex
 	canceled bool
+	debug    bool
 }
 
 func (w *worker) SetCheckError(plugin string, message string) {
@@ -444,7 +458,6 @@ func (w *worker) prepareRuntime() error {
 		var mounts map[string]string
 		if len(check.Mounts) > 0 {
 			mounts = map[string]string{}
-			bindings := map[string]string{}
 			for _, m := range check.Mounts {
 				local, ok := w.secretsSource[m.Authorization]
 				if !ok {
@@ -454,31 +467,10 @@ func (w *worker) prepareRuntime() error {
 					abortAndCleanup()
 					return fmt.Errorf("failed mounting secret for '%s': unable to locate secret path %s", check.Plugin, m.Target)
 				}
-				name := hash(m.Target)
-				mounts[local] = "/secrets/" + name
-				bindings[name] = m.Target
-			}
-			{
-				bindingPath := filepath.Join(w.secretsDir, "bindings")
-				bindingFile, err := os.Create(bindingPath)
-				if err != nil {
-					w.log.Error("Failed creating secret binding file", zap.Error(err))
-					abortAndCleanup()
-					return err
+				if strings.HasPrefix(m.Target, "~") {
+					m.Target = "/home/cocov" + m.Target[1:]
 				}
-				data := bytes.Buffer{}
-				for k, v := range bindings {
-					data.Write([]byte(fmt.Sprintf("%s=%s", k, v)))
-					data.WriteByte(0x00)
-				}
-
-				dataBytes := data.Bytes()
-				if err = writeAll(dataBytes[:len(dataBytes)-1], bindingFile, true); err != nil {
-					w.log.Error("Failed writing to secret binding file", zap.Error(err))
-					abortAndCleanup()
-					return err
-				}
-				mounts[bindingPath] = "/secrets/bindings"
+				mounts[local] = m.Target
 			}
 		}
 
@@ -489,6 +481,7 @@ func (w *worker) prepareRuntime() error {
 			Mounts:       mounts,
 			Envs:         check.Envs,
 			SourceVolume: w.sourceVolume,
+			JobID:        w.job.JobID,
 		})
 		if err != nil {
 			w.log.Error("Error creating container. Aborting operation.",
@@ -595,6 +588,10 @@ func (w *worker) serviceContainer(cID string, done func()) {
 		log.Error("GetContainerResult failed", zap.Error(err))
 		w.SetCheckError(cInfo.Image, fmt.Sprintf("Failed obtaining result data for %s: %s", cInfo.Image, err.Error()))
 		return
+	}
+
+	if w.debug {
+		log.Info("Container output", zap.String("output", containerOutput.String()))
 	}
 
 	w.operationCancelCheck()

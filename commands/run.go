@@ -26,6 +26,7 @@ func Run(ctx *cli.Context) error {
 	dockerTLSCertPath := ctx.String("docker-tls-cert-path")
 	dockerTLSKeyPath := ctx.String("docker-tls-key-path")
 	isDevelopment := os.Getenv("COCOV_WORKER_DEV") == "true"
+	debugPlugins := ctx.Bool("debug-plugins")
 
 	var logger *zap.Logger
 	var err error
@@ -81,7 +82,14 @@ func Run(ctx *cli.Context) error {
 		return err
 	}
 
-	jobRunner := runner.New(maxJobs, apiClient, dockerClient, redisClient, store)
+	jobRunner := runner.New(runner.SchedulerOpts{
+		MaxJobs:      maxJobs,
+		API:          apiClient,
+		Docker:       dockerClient,
+		RedisClient:  redisClient,
+		Storage:      store,
+		DebugPlugins: debugPlugins,
+	})
 
 	signalChan := make(chan os.Signal, 10)
 	signal.Notify(signalChan, os.Interrupt)

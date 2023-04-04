@@ -51,8 +51,16 @@ func makeMocks(t *testing.T) (*allMocks, *worker) {
 		isDone:    isDone,
 	}
 
-	w := newWorker(zap.L(), 0, scheduler, dockerMock, api, storage, redisMock, func() {
-		isDone.Store(true)
+	w := newWorker(workerOpts{
+		log:           zap.L(),
+		id:            0,
+		scheduler:     scheduler,
+		dockerClient:  dockerMock,
+		apiClient:     api,
+		storageClient: storage,
+		redisClient:   redisMock,
+		done:          func() { isDone.Store(true) },
+		debugPlugins:  false,
 	})
 
 	sleepFunc = func(d time.Duration) {}

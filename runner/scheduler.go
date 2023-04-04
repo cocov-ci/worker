@@ -22,16 +22,26 @@ type runnable interface {
 	CancelJob(jobID string)
 }
 
-func New(maxJobs int, api api.Client, docker docker.Client, redisClient redis.Client, storage storage.Base) *Scheduler {
+type SchedulerOpts struct {
+	MaxJobs      int
+	API          api.Client
+	Docker       docker.Client
+	RedisClient  redis.Client
+	Storage      storage.Base
+	DebugPlugins bool
+}
+
+func New(opts SchedulerOpts) *Scheduler {
 	return &Scheduler{
-		maxJobs:       maxJobs,
+		maxJobs:       opts.MaxJobs,
 		currentJobs:   map[string]time.Time{},
 		stopped:       false,
 		mu:            &sync.Mutex{},
-		api:           api,
-		docker:        docker,
-		redis:         redisClient,
-		storage:       storage,
+		api:           opts.API,
+		docker:        opts.Docker,
+		redis:         opts.RedisClient,
+		storage:       opts.Storage,
+		debugPlugins:  opts.DebugPlugins,
 		log:           zap.L().With(zap.String("facility", "runner")),
 		workerJobs:    map[int]*redis.Job{},
 		workers:       map[int]runnable{},
@@ -47,6 +57,7 @@ type Scheduler struct {
 	workerByJobID map[string]int
 	stopped       bool
 	mu            *sync.Mutex
+	debugPlugins  bool
 
 	api            api.Client
 	docker         docker.Client
@@ -119,7 +130,17 @@ func (r *Scheduler) Run() {
 		if r.workerFactory != nil {
 			w = r.workerFactory(wg.Done)
 		} else {
-			w = newWorker(r.log, i, r, r.docker, r.api, r.storage, r.redis, wg.Done)
+			w = newWorker(workerOpts{
+				log:           r.log,
+				id:            i,
+				scheduler:     r,
+				dockerClient:  r.docker,
+				apiClient:     r.api,
+				storageClient: r.storage,
+				redisClient:   r.redis,
+				done:          wg.Done,
+				debugPlugins:  r.debugPlugins,
+			})
 		}
 		r.workers[i] = w
 		go w.Run()

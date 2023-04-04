@@ -15,7 +15,14 @@ func makeScheduler(t *testing.T) (*allMocks, *Scheduler) {
 	zap.ReplaceGlobals(zap.NewNop())
 	mocks, _ := makeMocks(t)
 
-	return mocks, New(1, nil, nil, mocks.redis, nil)
+	return mocks, New(SchedulerOpts{
+		MaxJobs:      1,
+		API:          nil,
+		Docker:       nil,
+		RedisClient:  mocks.redis,
+		Storage:      nil,
+		DebugPlugins: false,
+	})
 }
 
 func TestScheduler_RegisterJob(t *testing.T) {
