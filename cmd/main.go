@@ -40,6 +40,9 @@ func main() {
 	app.Flags = []cli.Flag{
 		&cli.StringFlag{Name: "redis-url", EnvVars: envs("REDIS_URL"), Required: true},
 		&cli.StringFlag{Name: "docker-socket", EnvVars: envs("DOCKER_SOCKET"), Required: true},
+		&cli.StringFlag{Name: "docker-tls-ca-path", EnvVars: envs("DOCKER_TLS_CA_PATH"), Required: false},
+		&cli.StringFlag{Name: "docker-tls-cert-path", EnvVars: envs("DOCKER_TLS_CERT_PATH"), Required: false},
+		&cli.StringFlag{Name: "docker-tls-key-path", EnvVars: envs("DOCKER_TLS_KEY_PATH"), Required: false},
 		&cli.IntFlag{Name: "max-parallel-jobs", EnvVars: envs("MAX_PARALLEL_JOBS"), Required: false, Value: 5},
 		&cli.StringFlag{Name: "api-url", EnvVars: envs("API_URL"), Required: true},
 		&cli.StringFlag{Name: "service-token", EnvVars: envs("SERVICE_TOKEN"), Required: true},
