@@ -1,11 +1,16 @@
 package commands
 
 import (
+	"context"
+	"fmt"
 	"github.com/urfave/cli/v2"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"net"
+	"net/url"
 	"os"
 	"os/signal"
+	"time"
 
 	"github.com/cocov-ci/worker/api"
 	"github.com/cocov-ci/worker/docker"
@@ -13,6 +18,23 @@ import (
 	"github.com/cocov-ci/worker/runner"
 	"github.com/cocov-ci/worker/storage"
 )
+
+const attempts = 10
+
+func Backoff(log *zap.Logger, operation string, fn func() error) (err error) {
+	for i := 0; i < attempts; i++ {
+		time.Sleep(time.Duration(i*4) * time.Second)
+		if err = fn(); err != nil {
+			log.Error("Backoff "+operation,
+				zap.Int("delay_secs", (i+1)*4),
+				zap.String("attempt", fmt.Sprintf("%d/%d", i+1, attempts)),
+				zap.Error(err))
+			continue
+		}
+		return nil
+	}
+	return err
+}
 
 func Run(ctx *cli.Context) error {
 	redisURL := ctx.String("redis-url")
@@ -45,42 +67,93 @@ func Run(ctx *cli.Context) error {
 	defer func() { _ = logger.Sync() }()
 	zap.ReplaceGlobals(logger)
 
-	redisClient, err := redis.New(redisURL)
+	if cacheServerURL != "" {
+		var parsedUrl *url.URL
+		parsedUrl, err = url.Parse(cacheServerURL)
+		if err != nil {
+			logger.Error("Failed trying to parse cache server URL", zap.Error(err))
+			return err
+		}
+
+		host := parsedUrl.Hostname()
+		err = Backoff(logger, "resolving Cache server host", func() error {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			ips, err := net.DefaultResolver.LookupIP(ctx, "ip", host)
+			if err != nil {
+				return nil
+			}
+			logger.Info("Resolved cache server address",
+				zap.String("cache_server_url", cacheServerURL),
+				zap.Int("ips_length", len(ips)))
+			return nil
+		})
+		if err != nil {
+			logger.Warn("Unable to resolve cache server address. Disabling cache.",
+				zap.String("url", cacheServerURL),
+				zap.Error(err))
+			cacheServerURL = ""
+		}
+	}
+
+	var redisClient redis.Client
+	err = Backoff(logger, "initializing Redis client", func() error {
+		redisClient, err = redis.New(redisURL)
+		return err
+	})
 	if err != nil {
-		logger.Error("Failed initializing Redis client", zap.Error(err))
+		logger.Error("Gave up trying to initialize Redis client.")
 		return err
 	}
+
 	go redisClient.Start()
+	logger.Info("Redis client initialized")
 
 	store, err := storage.Initialize(storageMode, ctx)
 	if err != nil {
 		logger.Error("Failed initializing storage", zap.Error(err))
 		return err
 	}
+	logger.Info("Storage abstraction initialized")
 
-	dockerClient, err := docker.New(docker.ClientOpts{
-		Socket:         dockerSocket,
-		CacheServerURL: cacheServerURL,
-		TLSCAPath:      dockerTLSCAPath,
-		TLSKeyPath:     dockerTLSKeyPath,
-		TLSCertPath:    dockerTLSCertPath,
+	var dockerClient docker.Client
+	err = Backoff(logger, "initializing Docker client", func() error {
+		dockerClient, err = docker.New(docker.ClientOpts{
+			Socket:         dockerSocket,
+			CacheServerURL: cacheServerURL,
+			TLSCAPath:      dockerTLSCAPath,
+			TLSKeyPath:     dockerTLSKeyPath,
+			TLSCertPath:    dockerTLSCertPath,
+		})
+		return err
 	})
 	if err != nil {
-		logger.Error("Failed initializing Docker client", zap.Error(err))
+		logger.Error("Gave up trying to initialize Redis client.")
 		return err
 	}
+	logger.Info("Docker client initialized")
 
 	logger.Info("Preparing system images...")
-	if err = dockerClient.PullImage("alpine"); err != nil {
-		logger.Error("Failed downloading image", zap.Error(err))
-		return err
-	}
-
-	apiClient, err := api.New(apiURL, serviceToken)
+	thence := time.Now()
+	err = Backoff(logger, "preparing system images", func() error {
+		return dockerClient.PullImage("alpine")
+	})
 	if err != nil {
-		logger.Error("Failed initializing API client", zap.Error(err))
+		logger.Error("Gave up trying to prepare system images")
 		return err
 	}
+	logger.Info("Prepared system images", zap.String("elapsed", time.Since(thence).String()))
+
+	var apiClient api.Client
+	err = Backoff(logger, "initializing API client", func() error {
+		apiClient, err = api.New(apiURL, serviceToken)
+		return err
+	})
+	if err != nil {
+		logger.Error("Gave up trying to initialize API client")
+		return err
+	}
+	logger.Info("Initialized API client")
 
 	jobRunner := runner.New(runner.SchedulerOpts{
 		MaxJobs:      maxJobs,
