@@ -586,7 +586,7 @@ func (c *clientImpl) TerminateContainer(v *CreateContainerResult) {
 func (c *clientImpl) copySourceToLocalVolume(sourceVolume *PrepareVolumeResult, rwVolumeName string) error {
 	cont, err := c.d.ContainerCreate(context.Background(), &container.Config{
 		Image: "alpine",
-		Cmd:   []string{"ash", "-c", "cp -ra /src/from/. /src/to"},
+		Cmd:   []string{"ash", "-c", "cp -ra /src/from/. /src/to && chown -R 1000:1000 /src/to"},
 	}, &container.HostConfig{
 		Mounts: []mount.Mount{
 			{
