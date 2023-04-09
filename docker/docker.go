@@ -47,9 +47,10 @@ type RunInformation struct {
 }
 
 type CreateContainerResult struct {
-	ContainerID string
-	Image       string
-	OutputFile  string
+	ContainerID  string
+	Image        string
+	OutputFile   string
+	sourceVolume string
 }
 
 type PrepareVolumeResult struct {
@@ -292,16 +293,9 @@ func (c *clientImpl) resolveCacheServerURL(rawUrl string) ([]string, error) {
 }
 
 func (c *clientImpl) CreateContainer(info *RunInformation) (*CreateContainerResult, error) {
-	tempFile, err := os.CreateTemp("", "")
-	if err != nil {
-		return nil, err
-	}
-	if err = tempFile.Close(); err != nil {
-		return nil, err
-	}
-
 	workDirTarget := uuid.Generate().String()
 	outputTarget := uuid.Generate().String()
+	rwVolumeName := uuid.Generate().String()
 
 	var envs []string
 	var extraHosts []string
@@ -342,13 +336,31 @@ func (c *clientImpl) CreateContainer(info *RunInformation) (*CreateContainerResu
 		}
 	}
 
+	sourceVolume, err := c.d.VolumeCreate(context.Background(), volume.VolumeCreateBody{
+		Driver: "local",
+		Name:   rwVolumeName,
+	})
+
+	if err != nil {
+		c.log.Error("Failed creating new volume for RW source", zap.Error(err))
+		return nil, err
+	}
+
 	mounts := []mount.Mount{
 		{
 			Type:     mount.TypeVolume,
-			Source:   info.SourceVolume.VolumeID,
+			Source:   sourceVolume.Name,
 			Target:   "/work/" + workDirTarget,
-			ReadOnly: true,
+			ReadOnly: false,
 		},
+	}
+
+	if err = c.copySourceToLocalVolume(info.SourceVolume, sourceVolume.Name); err != nil {
+		c.log.Error("Failed copying source into rw volume", zap.Error(err))
+		if err := c.d.VolumeRemove(context.Background(), sourceVolume.Name, true); err != nil {
+			c.log.Error("Failed removing rw volume", zap.String("name", sourceVolume.Name), zap.Error(err))
+		}
+		return nil, err
 	}
 
 	var cmd []string
@@ -369,14 +381,18 @@ func (c *clientImpl) CreateContainer(info *RunInformation) (*CreateContainerResu
 	}, nil, nil, "")
 
 	if err != nil {
+		if err := c.d.VolumeRemove(context.Background(), sourceVolume.Name, true); err != nil {
+			c.log.Error("Failed removing rw volume", zap.String("name", sourceVolume.Name), zap.Error(err))
+		}
 		return nil, err
 	}
 
 	c.log.Info("Created container", zap.String("id", res.ID))
 	result := &CreateContainerResult{
-		ContainerID: res.ID,
-		OutputFile:  "/tmp/" + outputTarget,
-		Image:       info.Image,
+		ContainerID:  res.ID,
+		OutputFile:   "/tmp/" + outputTarget,
+		Image:        info.Image,
+		sourceVolume: sourceVolume.Name,
 	}
 
 	if err = c.copyMountsToContainer(result, info.Mounts); err != nil {
@@ -455,10 +471,21 @@ func (c *clientImpl) AbortAndRemove(container *CreateContainerResult) error {
 		c.log.Error("Failed removing outputFile", zap.Error(err), zap.String("container_id", container.ContainerID))
 	}
 
-	return c.d.ContainerRemove(context.Background(), container.ContainerID, types.ContainerRemoveOptions{
+	removeErr := c.d.ContainerRemove(context.Background(), container.ContainerID, types.ContainerRemoveOptions{
 		RemoveVolumes: true,
 		Force:         true,
 	})
+
+	if err := c.d.VolumeRemove(context.Background(), container.sourceVolume, true); err != nil {
+		c.log.Error(
+			"Failed removing rw volume for container",
+			zap.String("container_id", container.ContainerID),
+			zap.String("volume_id", container.sourceVolume),
+			zap.Error(err),
+		)
+	}
+
+	return removeErr
 }
 
 func (c *clientImpl) ContainerWait(id string) error {
@@ -554,4 +581,60 @@ func (c *clientImpl) RemoveVolume(vol *PrepareVolumeResult) error {
 
 func (c *clientImpl) TerminateContainer(v *CreateContainerResult) {
 	_ = c.d.ContainerKill(context.Background(), v.ContainerID, "SIGKILL")
+}
+
+func (c *clientImpl) copySourceToLocalVolume(sourceVolume *PrepareVolumeResult, rwVolumeName string) error {
+	cont, err := c.d.ContainerCreate(context.Background(), &container.Config{
+		Image: "alpine",
+		Cmd:   []string{"ash", "-c", "cp -ra /src/from/. /src/to"},
+	}, &container.HostConfig{
+		Mounts: []mount.Mount{
+			{
+				Type:     mount.TypeVolume,
+				Source:   sourceVolume.VolumeID,
+				Target:   "/src/from",
+				ReadOnly: true,
+			},
+			{
+				Type:     mount.TypeVolume,
+				Source:   rwVolumeName,
+				Target:   "/src/to",
+				ReadOnly: false,
+			},
+		},
+	}, nil, nil, "")
+
+	if err != nil {
+		return fmt.Errorf("failed creating helper container: %w", err)
+	}
+
+	if err = c.d.ContainerStart(context.Background(), cont.ID, types.ContainerStartOptions{}); err != nil {
+		return fmt.Errorf("failed starting helper container: %w", err)
+	}
+
+	failed := false
+	if err = c.ContainerWait(cont.ID); err != nil {
+		c.log.Error("Failed waiting for helper container", zap.Error(err))
+		failed = true
+	}
+
+	if failed {
+		output, status, err := c.GetContainerResult(cont.ID)
+		if err != nil {
+			c.log.Error("Failed obtaining container result", zap.Error(err))
+			return fmt.Errorf("failed running helper container, no output is available")
+		}
+
+		return fmt.Errorf("failed running helper container, status %d, output: %s", status, output.String())
+	}
+
+	err = c.d.ContainerRemove(context.Background(), cont.ID, types.ContainerRemoveOptions{
+		Force: true,
+	})
+
+	if err != nil {
+		c.log.Error("Failed removing helper container", zap.String("container_id", cont.ID), zap.Error(err))
+	}
+
+	return nil
 }
