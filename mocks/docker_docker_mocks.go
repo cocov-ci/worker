@@ -166,6 +166,18 @@ func (mr *DockerMockMockRecorder) RemoveVolume(vol interface{}) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RemoveVolume", reflect.TypeOf((*DockerMock)(nil).RemoveVolume), vol)
 }
 
+// RequestPrune mocks base method.
+func (m *DockerMock) RequestPrune() {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "RequestPrune")
+}
+
+// RequestPrune indicates an expected call of RequestPrune.
+func (mr *DockerMockMockRecorder) RequestPrune() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RequestPrune", reflect.TypeOf((*DockerMock)(nil).RequestPrune))
+}
+
 // TerminateContainer mocks base method.
 func (m *DockerMock) TerminateContainer(v *docker.CreateContainerResult) {
 	m.ctrl.T.Helper()

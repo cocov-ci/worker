@@ -527,6 +527,7 @@ func TestWorker_RunFull(t *testing.T) {
 
 	// Back to perform
 	m.api.EXPECT().WrapUp(w.job).Return(nil)
+	m.docker.EXPECT().RequestPrune()
 
 	// Test
 	test_helpers.Timeout(t, 5*time.Second, w.Run)
