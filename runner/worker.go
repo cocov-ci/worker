@@ -296,6 +296,13 @@ func (w *worker) perform() error {
 	if err = w.wrapUp(); err != nil {
 		w.log.Error("Error emitting wrap up signal", zap.Error(err))
 	}
+
+	// Ideally, each worker has its own DinD instance, so let's just ask for
+	// prune after each job. We may want to only do this occasionally in the
+	// future. RequestPrune will optimistically attempt to obtain a lock, and
+	// immediately bail in case it is unavailable.
+	w.docker.RequestPrune()
+
 	return err
 }
 

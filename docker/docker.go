@@ -5,11 +5,13 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/docker/docker/api/types/filters"
 	"io"
 	"net"
 	"net/url"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/docker/distribution/uuid"
@@ -68,6 +70,7 @@ type Client interface {
 	RemoveVolume(vol *PrepareVolumeResult) error
 	PrepareVolume(zstPath string) (*PrepareVolumeResult, error)
 	TerminateContainer(v *CreateContainerResult)
+	RequestPrune()
 }
 
 func ensureAll(values ...string) bool {
@@ -108,6 +111,7 @@ func New(opts ClientOpts) (Client, error) {
 		log:            zap.L().With(zap.String("facility", "docker")),
 		d:              cli,
 		cacheServerURL: opts.CacheServerURL,
+		pruneLock:      &sync.Mutex{},
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -133,6 +137,7 @@ type clientImpl struct {
 	log            *zap.Logger
 	d              *client.Client
 	cacheServerURL string
+	pruneLock      *sync.Mutex
 }
 
 func (c *clientImpl) PrepareVolume(zstPath string) (*PrepareVolumeResult, error) {
@@ -637,4 +642,61 @@ func (c *clientImpl) copySourceToLocalVolume(sourceVolume *PrepareVolumeResult, 
 	}
 
 	return nil
+}
+
+func (c *clientImpl) performPrune() {
+	defer c.pruneLock.Unlock()
+
+	listFilters := filters.Args{}
+	listFilters.Add("dangling", "true")
+
+	list, err := c.d.ImageList(context.Background(), types.ImageListOptions{
+		All:     true,
+		Filters: listFilters,
+	})
+	if err != nil {
+		c.log.Error("Failed listing dangling images", zap.Error(err))
+	} else {
+		for _, i := range list {
+			_, err = c.d.ImageRemove(context.Background(), i.ID, types.ImageRemoveOptions{
+				Force:         false,
+				PruneChildren: true,
+			})
+			if err != nil {
+				c.log.Warn("Failed removing dangling image", zap.String("image_id", i.ID), zap.Error(err))
+			}
+		}
+	}
+
+	listFilters = filters.Args{}
+	listFilters.Add("until", "7 days")
+	listFilters.Add("dangling", "false")
+	list, err = c.d.ImageList(context.Background(), types.ImageListOptions{
+		All:     true,
+		Filters: listFilters,
+	})
+	if err != nil {
+		c.log.Error("Failed listing stale images", zap.Error(err))
+	} else {
+		for _, i := range list {
+			_, err = c.d.ImageRemove(context.Background(), i.ID, types.ImageRemoveOptions{
+				Force:         false,
+				PruneChildren: true,
+			})
+			if err != nil {
+				c.log.Warn("Failed removing stale image", zap.String("image_id", i.ID), zap.Error(err))
+			}
+		}
+	}
+
+	c.log.Info("Finished image prune")
+}
+
+func (c *clientImpl) RequestPrune() {
+	if !c.pruneLock.TryLock() {
+		return
+	}
+
+	// we got the lock, prune away
+	go c.performPrune()
 }
