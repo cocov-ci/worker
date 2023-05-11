@@ -3,10 +3,12 @@ package commands
 import (
 	"context"
 	"fmt"
+	"github.com/cocov-ci/worker/probes"
 	"github.com/urfave/cli/v2"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
@@ -49,6 +51,7 @@ func Run(ctx *cli.Context) error {
 	dockerTLSKeyPath := ctx.String("docker-tls-key-path")
 	isDevelopment := os.Getenv("COCOV_WORKER_DEV") == "true"
 	debugPlugins := ctx.Bool("debug-plugins")
+	probesServerAddrs := ctx.String("probes-server-bind-address")
 
 	var logger *zap.Logger
 	var err error
@@ -66,6 +69,14 @@ func Run(ctx *cli.Context) error {
 
 	defer func() { _ = logger.Sync() }()
 	zap.ReplaceGlobals(logger)
+
+	logger.Info("Initializing probes server", zap.String("address", probesServerAddrs))
+	probesSrv := probes.NewStatus(probesServerAddrs)
+	go func() {
+		if err := probesSrv.Run(); err != nil && err != http.ErrServerClosed {
+			logger.Error("Proves server failed running", zap.Error(err))
+		}
+	}()
 
 	if cacheServerURL != "" {
 		var parsedUrl *url.URL
@@ -182,7 +193,9 @@ func Run(ctx *cli.Context) error {
 		}
 	}()
 
+	probesSrv.SetReady(true)
 	jobRunner.Run()
+	probesSrv.SetReady(false)
 
 	logger.Info("See you later!")
 
