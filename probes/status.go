@@ -26,7 +26,7 @@ func NewStatus(bindAddress string) *Status {
 		_, _ = w.Write(ok)
 	})
 	mux.HandleFunc("/system/probes/readiness", func(w http.ResponseWriter, r *http.Request) {
-		if s.ready.Load() {
+		if !s.ready.Load() {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			_, _ = w.Write(unavailable)
 		} else {
