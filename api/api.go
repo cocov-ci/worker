@@ -103,7 +103,7 @@ func (a api) do(method, endpoint string, opts *grequests.RequestOptions) ([]byte
 }
 
 func (a api) Ping() error {
-	_, err := a.do("GET", "/v1/ping", nil)
+	_, err := a.do("GET", "/system/probes/health", nil)
 	return err
 }
 

@@ -36,7 +36,7 @@ func TestNew(t *testing.T) {
 
 	t.Run("When ping fails", func(t *testing.T) {
 		server := makeServer(t,
-			httpie.WithCustom("/v1/ping", httpStatusCode(404, "Not found!")),
+			httpie.WithCustom("/system/probes/health", httpStatusCode(404, "Not found!")),
 		)
 
 		client, err := New(server.URL, "foobar")
@@ -46,7 +46,7 @@ func TestNew(t *testing.T) {
 
 	t.Run("When ping succeeds", func(t *testing.T) {
 		server := makeServer(t,
-			httpie.WithCustom("/v1/ping", httpStatusCode(200, "Yay")),
+			httpie.WithCustom("/system/probes/health", httpStatusCode(200, "Yay")),
 		)
 
 		client, err := New(server.URL, "foobar")
@@ -63,7 +63,7 @@ func TestParseManagedService(t *testing.T) {
 	require.NoError(t, err)
 
 	server := makeServer(t,
-		httpie.WithCustom("/v1/ping", httpStatusCode(500, string(data))),
+		httpie.WithCustom("/system/probes/health", httpStatusCode(500, string(data))),
 	)
 
 	client, err := New(server.URL, "foobar")
@@ -77,7 +77,7 @@ func TestParseManagedService(t *testing.T) {
 
 func makeTestServer(t *testing.T, endpoint string, handler http.HandlerFunc) Client {
 	srv := makeServer(t,
-		httpie.WithCustom("/v1/ping", httpStatusCode(200, "")),
+		httpie.WithCustom("/system/probes/health", httpStatusCode(200, "")),
 		httpie.WithCustom(endpoint, handler),
 	)
 
