@@ -51,6 +51,7 @@ func main() {
 		&cli.StringFlag{Name: "gs-s3-bucket-name", EnvVars: envs("GIT_SERVICE_S3_BUCKET_NAME"), Required: false},
 		&cli.StringFlag{Name: "cache-server-url", EnvVars: envs("CACHE_SERVER_URL"), Required: false},
 		&cli.BoolFlag{Name: "debug-plugins", EnvVars: envs("DEBUG_PLUGINS"), Required: false},
+		&cli.StringFlag{Name: "probes-server-bind-address", EnvVars: envs("PROBES_SERVER_BIND_ADDRESS"), Required: false, Value: "0.0.0.0:4000"},
 	}
 	app.Authors = []*cli.Author{
 		{Name: "Victor \"Vito\" Gama", Email: "hey@vito.io"},
