@@ -647,7 +647,7 @@ func (c *clientImpl) copySourceToLocalVolume(sourceVolume *PrepareVolumeResult, 
 func (c *clientImpl) performPrune() {
 	defer c.pruneLock.Unlock()
 
-	listFilters := filters.Args{}
+	listFilters := filters.NewArgs()
 	listFilters.Add("dangling", "true")
 
 	list, err := c.d.ImageList(context.Background(), types.ImageListOptions{
@@ -668,7 +668,7 @@ func (c *clientImpl) performPrune() {
 		}
 	}
 
-	listFilters = filters.Args{}
+	listFilters = filters.NewArgs()
 	listFilters.Add("until", "7 days")
 	listFilters.Add("dangling", "false")
 	list, err = c.d.ImageList(context.Background(), types.ImageListOptions{
